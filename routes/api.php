@@ -10,6 +10,8 @@
 
 use Zephyr\Http\{Request, Response};
 use App\Controllers\TestController;
+use Zephyr\Exceptions\Http\NotFoundException;
+use Zephyr\Exceptions\Http\ValidationException;
 
 $router = app()->router();
 
@@ -70,4 +72,19 @@ $router->group(['prefix' => '/admin'], function($router) {
     $router->get('/users', function() {
         return Response::success(['message' => 'Admin users list']);
     });
+});
+
+$router->get('/test-error', function() {
+    throw new NotFoundException('User not found');
+});
+
+$router->get('/test-validation', function() {
+    throw new ValidationException([
+        'email' => ['Email is required', 'Email must be valid'],
+        'password' => ['Password must be at least 8 characters']
+    ]);
+});
+
+$router->get('/test-server-error', function() {
+    throw new RuntimeException('Something went wrong!');
 });

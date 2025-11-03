@@ -116,9 +116,18 @@ class Response
 
     /**
      * Create an error response
+     *
+     * @param string $message Error message
+     * @param int $status HTTP status code
+     * @param array|null $errors Validation errors or additional error details
+     * @param mixed $data Additional data (e.g., debug info)
      */
-    public static function error(string $message, int $status = 400, array $errors = []): self
-    {
+    public static function error(
+        string $message,
+        int $status = 400,
+        ?array $errors = null,
+        mixed $data = null
+    ): self {
         $response = [
             'success' => false,
             'error' => [
@@ -126,11 +135,17 @@ class Response
                 'code' => static::getErrorCode($status),
             ],
         ];
-        
-        if (!empty($errors)) {
+
+        // Add errors/details if provided
+        if ($errors !== null && !empty($errors)) {
             $response['error']['details'] = $errors;
         }
-        
+
+        // Add additional data if provided (for debug info, etc.)
+        if ($data !== null) {
+            $response['data'] = $data;
+        }
+
         return static::json($response, $status);
     }
 
