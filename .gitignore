@@ -1,0 +1,35 @@
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Composer
+vendor/
+composer.lock
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Storage
+storage/logs/*
+storage/cache/*
+storage/framework/*
+!storage/**/.gitkeep
+
+# Testing
+.phpunit.cache
+.phpunit.result.cache
+coverage/
+phpunit.xml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+build/
+dist/
