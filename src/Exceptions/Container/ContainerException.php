@@ -20,17 +20,3 @@ use RuntimeException;
 class ContainerException extends RuntimeException
 {
 }
-
-/**
- * Exception thrown when a binding cannot be resolved
- */
-class BindingResolutionException extends ContainerException
-{
-}
-
-/**
- * Exception thrown when circular dependency is detected
- */
-class CircularDependencyException extends ContainerException
-{
-}

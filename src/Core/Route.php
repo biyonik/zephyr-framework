@@ -165,27 +165,28 @@ class Route
      */
     public function execute(Request $request, array $parameters = []): Response
     {
+        // Inject route parameters into request
+        $request->setRouteParams($parameters);
+        
         $action = $this->action;
         
-        // Closure
+        // Handle Closure action
         if ($action instanceof Closure) {
+            // Pass both Request (via DI) and parameters (as named args)
             $result = app()->call($action, $parameters);
             return $this->prepareResponse($result);
         }
         
-        // Controller@method string format
+        // Parse controller action
         if (is_string($action)) {
             if (str_contains($action, '@')) {
                 [$controller, $method] = explode('@', $action);
             } else {
                 throw new \InvalidArgumentException("Invalid route action format: {$action}");
             }
-        }
-        // [Controller, method] array format
-        elseif (is_array($action)) {
+        } elseif (is_array($action)) {
             [$controller, $method] = $action;
-        }
-        else {
+        } else {
             throw new \InvalidArgumentException("Invalid route action type");
         }
         
@@ -198,6 +199,7 @@ class Route
         $instance = app()->resolve($controller);
         
         // Call controller method with dependency injection
+        // The container will inject Request and any route parameters
         $result = app()->call([$instance, $method], $parameters);
         
         return $this->prepareResponse($result);

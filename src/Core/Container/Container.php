@@ -32,7 +32,7 @@ trait Container
     /**
      * The container's shared instances (singletons)
      * 
-     * @var array<string, object>
+     * @var array<string, mixed>
      */
     protected array $instances = [];
 
@@ -67,7 +67,7 @@ trait Container
     /**
      * Register an existing instance as singleton
      */
-    public function instance(string $abstract, object $instance): void
+    public function instance(string $abstract, mixed $instance): void
     {
         $this->instances[$abstract] = $instance;
     }
@@ -237,11 +237,57 @@ trait Container
             
             $reflector = new ReflectionClass($class);
             $method = $reflector->getMethod($method);
-            $dependencies = $this->resolveDependencies($method->getParameters());
+            $dependencies = $this->resolveMethodDependencies($method->getParameters(), $parameters);
             
-            return $method->invokeArgs($class, array_merge($dependencies, $parameters));
+            return $method->invokeArgs($class, $dependencies);
+        }
+
+        // For closures and functions
+        if ($callback instanceof Closure) {
+            $reflection = new \ReflectionFunction($callback);
+            $dependencies = $this->resolveMethodDependencies($reflection->getParameters(), $parameters);
+            return $callback(...$dependencies);
         }
 
         return call_user_func_array($callback, $parameters);
+    }
+
+    /**
+     * Resolve method dependencies with support for route parameters
+     * 
+     * @param ReflectionParameter[] $reflectionParams
+     * @param array $parameters Route parameters or manual parameters
+     * @return array
+     */
+    protected function resolveMethodDependencies(array $reflectionParams, array $parameters = []): array
+    {
+        $dependencies = [];
+
+        foreach ($reflectionParams as $param) {
+            $name = $param->getName();
+            $type = $param->getType();
+
+            // Check if we have a value for this parameter by name
+            if (array_key_exists($name, $parameters)) {
+                $dependencies[] = $parameters[$name];
+                continue;
+            }
+
+            // If no type hint, try to get from parameters or use default
+            if (is_null($type) || $type->isBuiltin()) {
+                if ($param->isDefaultValueAvailable()) {
+                    $dependencies[] = $param->getDefaultValue();
+                } else {
+                    // For backward compatibility, add remaining parameters in order
+                    $dependencies[] = array_shift($parameters);
+                }
+                continue;
+            }
+
+            // Resolve class dependencies from container
+            $dependencies[] = $this->resolve($type->getName());
+        }
+
+        return $dependencies;
     }
 }
