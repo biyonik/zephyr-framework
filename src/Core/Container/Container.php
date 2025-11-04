@@ -230,15 +230,15 @@ trait Container
     {
         if (is_array($callback)) {
             [$class, $method] = $callback;
-            
+
             if (is_string($class)) {
                 $class = $this->resolve($class);
             }
-            
+
             $reflector = new ReflectionClass($class);
             $method = $reflector->getMethod($method);
             $dependencies = $this->resolveMethodDependencies($method->getParameters(), $parameters);
-            
+
             return $method->invokeArgs($class, $dependencies);
         }
 
@@ -269,7 +269,14 @@ trait Container
 
             // Check if we have a value for this parameter by name
             if (array_key_exists($name, $parameters)) {
-                $dependencies[] = $parameters[$name];
+                $value = $parameters[$name];
+
+                // ✅ NEW: Type coercion for builtin types
+                if ($type && $type->isBuiltin() && !is_null($value)) {
+                    $value = $this->castToType($value, $type->getName());
+                }
+
+                $dependencies[] = $value;
                 continue;
             }
 
@@ -289,5 +296,118 @@ trait Container
         }
 
         return $dependencies;
+    }
+
+    /**
+     * Cast value to specified builtin type
+     * 
+     * Safely converts string values (from route parameters) to expected types.
+     * Handles common PHP builtin types with proper validation.
+     * 
+     * @param mixed $value Value to cast
+     * @param string $type Target type name
+     * @return mixed Casted value
+     * 
+     * @author  Ahmet ALTUN
+     * @email   ahmet.altun60@gmail.com
+     * @github  https://github.com/biyonik
+     */
+    protected function castToType(mixed $value, string $type): mixed
+    {
+        // If already correct type, return as-is
+        if (gettype($value) === $type) {
+            return $value;
+        }
+
+        return match ($type) {
+            'int' => $this->castToInt($value),
+            'float' => $this->castToFloat($value),
+            'bool' => $this->castToBool($value),
+            'string' => (string) $value,
+            'array' => $this->castToArray($value),
+            default => $value
+        };
+    }
+
+    /**
+     * Cast to integer with validation
+     * 
+     * @throws \InvalidArgumentException If value cannot be converted to int
+     */
+    protected function castToInt(mixed $value): int
+    {
+        // Numeric string check
+        if (is_string($value)) {
+            if (!is_numeric($value)) {
+                throw new \InvalidArgumentException(
+                    "Cannot cast non-numeric string '{$value}' to int"
+                );
+            }
+            return (int) $value;
+        }
+
+        // Direct cast for other types
+        return (int) $value;
+    }
+
+    /**
+     * Cast to float with validation
+     * 
+     * @throws \InvalidArgumentException If value cannot be converted to float
+     */
+    protected function castToFloat(mixed $value): float
+    {
+        if (is_string($value)) {
+            if (!is_numeric($value)) {
+                throw new \InvalidArgumentException(
+                    "Cannot cast non-numeric string '{$value}' to float"
+                );
+            }
+            return (float) $value;
+        }
+
+        return (float) $value;
+    }
+
+    /**
+     * Cast to boolean
+     * 
+     * Handles common truthy/falsy representations:
+     * - "1", "true", "yes", "on" → true
+     * - "0", "false", "no", "off" → false
+     */
+    protected function castToBool(mixed $value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        if (is_string($value)) {
+            $lower = strtolower($value);
+
+            if (in_array($lower, ['1', 'true', 'yes', 'on'])) {
+                return true;
+            }
+
+            if (in_array($lower, ['0', 'false', 'no', 'off', ''])) {
+                return false;
+            }
+        }
+
+        // Use PHP's built-in boolean conversion
+        return (bool) $value;
+    }
+
+    /**
+     * Cast to array
+     */
+    protected function castToArray(mixed $value): array
+    {
+        if (is_array($value)) {
+            return $value;
+        }
+
+        // Wrap non-array values
+        return [$value];
     }
 }
