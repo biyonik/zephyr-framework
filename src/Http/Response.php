@@ -32,6 +32,11 @@ class Response
     protected array $headers = [];
 
     /**
+     * Associated request (for HEAD detection)
+     */
+    protected ?Request $request = null;
+
+    /**
      * HTTP status texts
      */
     protected static array $statusTexts = [
@@ -323,6 +328,47 @@ class Response
     }
 
     /**
+     * Associate a request with this response
+     * 
+     * This allows the response to adapt its behavior based on the request.
+     * For example, HEAD requests should not send a body.
+     * 
+     * @param Request $request The associated request
+     * @return self
+     */
+    public function setRequest(Request $request): self
+    {
+        $this->request = $request;
+        return $this;
+    }
+
+    /**
+     * Get associated request
+     * 
+     * @return Request|null
+     */
+    public function getRequest(): ?Request
+    {
+        return $this->request;
+    }
+
+    /**
+     * Check if this is a HEAD request
+     * 
+     * @return bool
+     */
+    protected function isHeadRequest(): bool
+    {
+        // If request is associated, use it (testable)
+        if ($this->request) {
+            return $this->request->isMethod('HEAD');
+        }
+        
+        // Fallback to $_SERVER (for backwards compatibility)
+        return ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'HEAD';
+    }
+
+    /**
      * Set cookie
      */
     public function cookie(
@@ -388,6 +434,9 @@ class Response
 
     /**
      * Send the response
+     * 
+     * Outputs HTTP status code, headers, and content.
+     * For HEAD requests, only status and headers are sent (no body).
      */
     public function send(): void
     {
@@ -405,7 +454,16 @@ class Response
             }
         }
         
-        // Send content
+        // ✅ Skip body for HEAD requests (HTTP spec compliance)
+        if ($this->isHeadRequest()) {
+            // Terminate early without sending content
+            if (function_exists('fastcgi_finish_request')) {
+                fastcgi_finish_request();
+            }
+            return;
+        }
+        
+        // Send content (only for non-HEAD requests)
         echo $this->content;
         
         // Terminate if FastCGI

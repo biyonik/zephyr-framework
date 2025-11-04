@@ -52,13 +52,18 @@ class Handler
         // Build error response
         $error = $this->buildErrorResponse($e, $statusCode);
 
-        // Return JSON response
-        return Response::error(
+        // Create response
+        $response = Response::error(
             message: $error['message'],
             status: $statusCode,
             errors: $error['errors'] ?? null,
             data: $error['debug'] ?? null
         );
+
+        // ✅ Associate request with response
+        $response->setRequest($request);
+
+        return $response;
     }
 
     /**
