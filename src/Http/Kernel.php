@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Zephyr\Http;
 
+use Throwable;
 use Zephyr\Core\{App, Router};
+use Zephyr\Exceptions\Handler as ExceptionHandler;
 
 /**
  * HTTP Kernel
@@ -49,12 +51,40 @@ class Kernel
 
     /**
      * Handle incoming HTTP request
+     * 
+     * This is the main entry point for all HTTP requests.
+     * Exceptions are caught and converted to proper error responses.
+     * 
+     * @param Request $request The HTTP request
+     * @return Response The HTTP response
      */
     public function handle(Request $request): Response
     {
-        // For now, directly dispatch to router
-        // Later we'll add middleware pipeline here
-        return $this->router->dispatch($request);
+        try {
+            // ✅ Wrap routing in try/catch for exception handling
+            // Later: Add middleware pipeline here
+            return $this->router->dispatch($request);
+            
+        } catch (Throwable $e) {
+            // ✅ Convert exception to error response
+            return $this->handleException($e, $request);
+        }
+    }
+
+    /**
+     * Handle an exception and convert to response
+     * 
+     * @param Throwable $e The exception
+     * @param Request $request The request that caused the exception
+     * @return Response Error response
+     */
+    protected function handleException(Throwable $e, Request $request): Response
+    {
+        // Get exception handler from container
+        $handler = $this->app->resolve(ExceptionHandler::class);
+        
+        // Convert exception to response
+        return $handler->handle($e, $request);
     }
 
     /**
