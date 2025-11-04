@@ -11,6 +11,9 @@ declare(strict_types=1);
  */
 
 use Zephyr\Core\App;
+use Zephyr\Database\Connection;
+use Zephyr\Database\QueryBuilder;
+use Zephyr\Http\Response;
 use Zephyr\Support\Config;
 use Zephyr\Support\Env;
 use Zephyr\Http\Request;
@@ -85,9 +88,9 @@ if (!function_exists('response')) {
     /**
      * Create a response instance
      */
-    function response(mixed $content = '', int $status = 200, array $headers = []): \Zephyr\Http\Response
+    function response(mixed $content = '', int $status = 200, array $headers = []): Response
     {
-        return new \Zephyr\Http\Response($content, $status, $headers);
+        return new Response($content, $status, $headers);
     }
 }
 
@@ -118,10 +121,11 @@ if (!function_exists('value')) {
 if (!function_exists('now')) {
     /**
      * Get current datetime
+     * @throws Exception
      */
-    function now(): \DateTimeImmutable
+    function now(): DateTimeImmutable
     {
-        return new \DateTimeImmutable('now', new \DateTimeZone(config('app.timezone', 'UTC')));
+        return new DateTimeImmutable('now', new DateTimeZone(config('app.timezone', 'UTC')));
     }
 }
 
@@ -138,5 +142,28 @@ if (!function_exists('ip_address')) {
         
         // In CLI context
         return '127.0.0.1';
+    }
+}
+
+if (!function_exists('db')) {
+    /**
+     * Get query builder instance
+     *
+     * @param string|null $table Optional table name
+     * @return QueryBuilder|Connection
+     *
+     * @example
+     * db('users')->where('status', '=', 'active')->get();
+     * db()->raw('SELECT * FROM users');
+     */
+    function db(?string $table = null): QueryBuilder|Connection
+    {
+        $connection = Connection::getInstance();
+
+        if (is_null($table)) {
+            return new QueryBuilder($connection);
+        }
+
+        return (new QueryBuilder($connection))->from($table);
     }
 }
