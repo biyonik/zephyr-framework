@@ -87,13 +87,13 @@ class Response
     public static function json(mixed $data, int $status = 200, array $headers = []): self
     {
         $headers['Content-Type'] = 'application/json';
-        
+
         $content = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        
+
         if ($content === false) {
             throw new \RuntimeException('Failed to encode JSON: ' . json_last_error_msg());
         }
-        
+
         return new self($content, $status, $headers);
     }
 
@@ -106,32 +106,73 @@ class Response
             'success' => true,
             'data' => $data,
         ];
-        
+
         if ($message !== null) {
             $response['message'] = $message;
         }
-        
+
         $response['meta'] = [
             'timestamp' => now()->format('Y-m-d\TH:i:s\Z'),
             'request_id' => uniqid('req_', true),
         ];
-        
+
         return static::json($response, $status);
     }
 
     /**
      * Create an error response
-     *
-     * @param string $message Error message
+     * 
+     * Provides a standardized error format for all error responses.
+     * Always uses "details" field for additional error information.
+     * 
+     * @param string $message Human-readable error message
      * @param int $status HTTP status code
-     * @param array|null $errors Validation errors or additional error details
-     * @param mixed $data Additional data (e.g., debug info)
+     * @param array|null $details Additional error details (validation errors, debug info, etc.)
+     * @return self
+     * 
+     * @author  Ahmet ALTUN
+     * @email   ahmet.altun60@gmail.com
+     * @github  https://github.com/biyonik
+     * 
+     * @example Simple error
+     * ```php
+     * Response::error('User not found', 404)
+     * // Returns:
+     * // {
+     * //   "success": false,
+     * //   "error": {
+     * //     "message": "User not found",
+     * //     "code": "NOT_FOUND"
+     * //   },
+     * //   "meta": {...}
+     * // }
+     * ```
+     * 
+     * @example Validation error
+     * ```php
+     * Response::error('Validation failed', 422, [
+     *     'email' => ['Email is required'],
+     *     'password' => ['Password too short']
+     * ])
+     * // Returns:
+     * // {
+     * //   "success": false,
+     * //   "error": {
+     * //     "message": "Validation failed",
+     * //     "code": "VALIDATION_ERROR",
+     * //     "details": {
+     * //       "email": ["Email is required"],
+     * //       "password": ["Password too short"]
+     * //     }
+     * //   },
+     * //   "meta": {...}
+     * // }
+     * ```
      */
     public static function error(
         string $message,
         int $status = 400,
-        ?array $errors = null,
-        mixed $data = null
+        ?array $details = null
     ): self {
         $response = [
             'success' => false,
@@ -141,15 +182,16 @@ class Response
             ],
         ];
 
-        // Add errors/details if provided
-        if ($errors !== null && !empty($errors)) {
-            $response['error']['details'] = $errors;
+        // ✅ STANDARDIZATION: Always use "details" when present
+        if ($details !== null && !empty($details)) {
+            $response['error']['details'] = $details;
         }
 
-        // Add additional data if provided (for debug info, etc.)
-        if ($data !== null) {
-            $response['data'] = $data;
-        }
+        // Add meta information
+        $response['meta'] = [
+            'timestamp' => now()->format('Y-m-d\TH:i:s\Z'),
+            'request_id' => uniqid('req_', true),
+        ];
 
         return static::json($response, $status);
     }
@@ -167,12 +209,12 @@ class Response
                 'timestamp' => now()->format('Y-m-d\TH:i:s\Z'),
             ],
         ];
-        
+
         // Add links if available
         if (isset($pagination['current_page']) && isset($pagination['last_page'])) {
             $response['links'] = static::generatePaginationLinks($pagination);
         }
-        
+
         return static::json($response, $status);
     }
 
@@ -184,22 +226,22 @@ class Response
         $currentPage = $pagination['current_page'];
         $lastPage = $pagination['last_page'];
         $baseUrl = $pagination['base_url'] ?? '/';
-        
+
         $links = [
             'first' => "{$baseUrl}?page=1",
             'last' => "{$baseUrl}?page={$lastPage}",
             'prev' => null,
             'next' => null,
         ];
-        
+
         if ($currentPage > 1) {
             $links['prev'] = "{$baseUrl}?page=" . ($currentPage - 1);
         }
-        
+
         if ($currentPage < $lastPage) {
             $links['next'] = "{$baseUrl}?page=" . ($currentPage + 1);
         }
-        
+
         return $links;
     }
 
@@ -246,11 +288,11 @@ class Response
         if (!is_file($file) || !is_readable($file)) {
             throw new \RuntimeException("File not found or not readable: {$file}");
         }
-        
+
         $name ??= basename($file);
         $content = file_get_contents($file);
         $mimeType = mime_content_type($file) ?: 'application/octet-stream';
-        
+
         $headers = [
             'Content-Type' => $mimeType,
             'Content-Disposition' => 'attachment; filename="' . $name . '"',
@@ -259,7 +301,7 @@ class Response
             'Pragma' => 'no-cache',
             'Expires' => '0',
         ];
-        
+
         return new self($content, 200, $headers);
     }
 
@@ -288,7 +330,7 @@ class Response
         if ($code < 100 || $code >= 600) {
             throw new \InvalidArgumentException("Invalid HTTP status code: {$code}");
         }
-        
+
         $this->statusCode = $code;
         return $this;
     }
@@ -363,7 +405,7 @@ class Response
         if ($this->request) {
             return $this->request->isMethod('HEAD');
         }
-        
+
         // Fallback to $_SERVER (for backwards compatibility)
         return ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'HEAD';
     }
@@ -391,9 +433,9 @@ class Response
             'httponly' => $httpOnly,
             'samesite' => $sameSite,
         ];
-        
+
         $this->headers['Set-Cookie'][] = $this->buildCookieHeader($cookie);
-        
+
         return $this;
     }
 
@@ -403,32 +445,32 @@ class Response
     protected function buildCookieHeader(array $cookie): string
     {
         $header = urlencode($cookie['name']) . '=' . urlencode($cookie['value']);
-        
+
         if ($cookie['expire'] > 0) {
             $header .= '; Expires=' . gmdate('D, d-M-Y H:i:s T', $cookie['expire']);
             $header .= '; Max-Age=' . ($cookie['expire'] - time());
         }
-        
+
         if ($cookie['path']) {
             $header .= '; Path=' . $cookie['path'];
         }
-        
+
         if ($cookie['domain']) {
             $header .= '; Domain=' . $cookie['domain'];
         }
-        
+
         if ($cookie['secure']) {
             $header .= '; Secure';
         }
-        
+
         if ($cookie['httponly']) {
             $header .= '; HttpOnly';
         }
-        
+
         if ($cookie['samesite']) {
             $header .= '; SameSite=' . $cookie['samesite'];
         }
-        
+
         return $header;
     }
 
@@ -442,7 +484,7 @@ class Response
     {
         // Send status code
         http_response_code($this->statusCode);
-        
+
         // Send headers
         foreach ($this->headers as $key => $value) {
             if (is_array($value)) {
@@ -453,7 +495,7 @@ class Response
                 header("{$key}: {$value}");
             }
         }
-        
+
         // ✅ Skip body for HEAD requests (HTTP spec compliance)
         if ($this->isHeadRequest()) {
             // Terminate early without sending content
@@ -462,10 +504,10 @@ class Response
             }
             return;
         }
-        
+
         // Send content (only for non-HEAD requests)
         echo $this->content;
-        
+
         // Terminate if FastCGI
         if (function_exists('fastcgi_finish_request')) {
             fastcgi_finish_request();

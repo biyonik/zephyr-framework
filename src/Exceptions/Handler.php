@@ -52,15 +52,14 @@ class Handler
         // Build error response
         $error = $this->buildErrorResponse($e, $statusCode);
 
-        // Create response
+        // Create standardized error response
         $response = Response::error(
             message: $error['message'],
             status: $statusCode,
-            errors: $error['errors'] ?? null,
-            data: $error['debug'] ?? null
+            details: $error['details'] ?? null
         );
 
-        // ✅ Associate request with response
+        // Associate request with response
         $response->setRequest($request);
 
         return $response;
@@ -113,8 +112,13 @@ class Handler
 
     /**
      * Build error response array
-     *
-     * @return array{message: string, errors?: array, debug?: array}
+     * 
+     * Constructs a standardized error response with consistent format.
+     * All additional error information goes in the "details" field.
+     * 
+     * @param Throwable $e The exception
+     * @param int $statusCode HTTP status code
+     * @return array{message: string, details?: array}
      */
     protected function buildErrorResponse(Throwable $e, int $statusCode): array
     {
@@ -122,14 +126,25 @@ class Handler
             'message' => $this->getErrorMessage($e, $statusCode),
         ];
 
-        // Add validation errors if it's a ValidationException
+        // Collect all details in one array
+        $details = [];
+
+        // Add validation errors if present
         if ($e instanceof ValidationException) {
-            $response['errors'] = $e->getErrors();
+            $details = $e->getErrors();
         }
 
         // Add debug information in debug mode
         if ($this->isDebugMode()) {
-            $response['debug'] = $this->getDebugInfo($e);
+            $debugInfo = $this->getDebugInfo($e);
+
+            // Merge with existing details (validation errors have priority)
+            $details = array_merge($debugInfo, $details);
+        }
+
+        // Only add details if not empty
+        if (!empty($details)) {
+            $response['details'] = $details;
         }
 
         return $response;
