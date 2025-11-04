@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Zephyr\Http;
 
+use Zephyr\Support\Config;
+use Zephyr\Support\IpAddress;
+
 /**
  * HTTP Request Handler
  * 
@@ -102,16 +105,16 @@ class Request
     {
         $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
         $uri = $_SERVER['REQUEST_URI'] ?? '/';
-        
+
         // Parse headers from $_SERVER
         $headers = static::parseHeaders($_SERVER);
-        
+
         // Parse body based on content type
         $body = static::parseBody($method, $headers['Content-Type'] ?? '');
-        
+
         // Parse uploaded files
         $files = static::parseFiles($_FILES);
-        
+
         return new self(
             $method,
             $uri,
@@ -130,7 +133,7 @@ class Request
     protected static function parseHeaders(array $server): array
     {
         $headers = [];
-        
+
         foreach ($server as $key => $value) {
             // Convert HTTP_* headers
             if (str_starts_with($key, 'HTTP_')) {
@@ -144,7 +147,7 @@ class Request
                 $headers[$header] = $value;
             }
         }
-        
+
         return $headers;
     }
 
@@ -157,25 +160,25 @@ class Request
         if (in_array($method, ['GET', 'HEAD', 'OPTIONS'])) {
             return [];
         }
-        
+
         // Get raw body
         $rawBody = file_get_contents('php://input');
-        
+
         if (empty($rawBody)) {
             return $_POST;
         }
-        
+
         // Parse based on content type
         if (str_contains($contentType, 'application/json')) {
             $data = json_decode($rawBody, true);
             return is_array($data) ? $data : [];
         }
-        
+
         if (str_contains($contentType, 'application/x-www-form-urlencoded')) {
             parse_str($rawBody, $data);
             return $data;
         }
-        
+
         // Default to $_POST for form data
         return $_POST;
     }
@@ -186,7 +189,7 @@ class Request
     protected static function parseFiles(array $files): array
     {
         $parsed = [];
-        
+
         foreach ($files as $key => $file) {
             // Handle multiple file uploads
             if (is_array($file['name'] ?? null)) {
@@ -195,7 +198,7 @@ class Request
                 $parsed[$key] = $file;
             }
         }
-        
+
         return $parsed;
     }
 
@@ -206,7 +209,7 @@ class Request
     {
         $parsed = [];
         $count = count($files['name']);
-        
+
         for ($i = 0; $i < $count; $i++) {
             $parsed[] = [
                 'name' => $files['name'][$i],
@@ -216,7 +219,7 @@ class Request
                 'size' => $files['size'][$i],
             ];
         }
-        
+
         return $parsed;
     }
 
@@ -227,7 +230,7 @@ class Request
     {
         $uri = parse_url($uri, PHP_URL_PATH) ?? '/';
         $uri = rtrim($uri, '/') ?: '/';
-        
+
         return $uri;
     }
 
@@ -237,12 +240,12 @@ class Request
     protected function normalizeHeaders(array $headers): array
     {
         $normalized = [];
-        
+
         foreach ($headers as $key => $value) {
             $key = ucwords(strtolower(str_replace('_', '-', $key)), '-');
             $normalized[$key] = $value;
         }
-        
+
         return $normalized;
     }
 
@@ -277,7 +280,7 @@ class Request
     {
         $scheme = $this->isSecure() ? 'https' : 'http';
         $host = $this->header('Host', 'localhost');
-        
+
         return "{$scheme}://{$host}{$this->uri}";
     }
 
@@ -323,7 +326,7 @@ class Request
         if (is_null($key)) {
             return $this->query;
         }
-        
+
         return $this->query[$key] ?? $default;
     }
 
@@ -335,7 +338,7 @@ class Request
         if (is_null($key)) {
             return $this->body;
         }
-        
+
         return $this->body[$key] ?? $default;
     }
 
@@ -388,13 +391,13 @@ class Request
     {
         $keys = is_array($keys) ? $keys : [$keys];
         $all = $this->all();
-        
+
         foreach ($keys as $key) {
             if (!array_key_exists($key, $all)) {
                 return false;
             }
         }
-        
+
         return true;
     }
 
@@ -405,13 +408,13 @@ class Request
     {
         $keys = is_array($keys) ? $keys : [$keys];
         $all = $this->all();
-        
+
         foreach ($keys as $key) {
             if (empty($all[$key])) {
                 return false;
             }
         }
-        
+
         return true;
     }
 
@@ -449,33 +452,117 @@ class Request
     }
 
     /**
-     * Get client IP address
+     * Get client IP address (with trusted proxy support)
+     * 
+     * Securely determines the real client IP address, respecting
+     * trusted proxy configuration to prevent header spoofing.
+     * 
+     * @return string Client IP address
      */
     public function ip(): string
     {
         if ($this->ip !== null) {
             return $this->ip;
         }
-        
-        // Check for proxied IPs
-        $keys = ['HTTP_X_FORWARDED_FOR', 'HTTP_X_REAL_IP', 'HTTP_CLIENT_IP', 'REMOTE_ADDR'];
-        
-        foreach ($keys as $key) {
-            if ($ip = $this->server($key)) {
-                // Handle comma-separated IPs (from proxies)
-                if (str_contains($ip, ',')) {
-                    $ip = trim(explode(',', $ip)[0]);
-                }
-                
-                if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
-                    $this->ip = $ip;
-                    return $this->ip;
-                }
+
+        // Get remote address (direct connection)
+        $remoteAddr = $this->server('REMOTE_ADDR', '127.0.0.1');
+
+        // Get trusted proxy configuration
+        $trustedProxies = Config::get('trustedproxy.proxies', []);
+        $trustedHeaders = Config::get('trustedproxy.headers', []);
+
+        // If no trusted proxies configured, always use REMOTE_ADDR
+        if (empty($trustedProxies)) {
+            $this->ip = $remoteAddr;
+            return $this->ip;
+        }
+
+        // ✅ SECURITY: Only trust headers if request comes from trusted proxy
+        if (!IpAddress::inRanges($remoteAddr, $trustedProxies)) {
+            // Request not from trusted proxy, ignore all headers
+            $this->ip = $remoteAddr;
+            return $this->ip;
+        }
+
+        // Request is from trusted proxy, check forwarded headers
+        $ip = $this->getIpFromTrustedHeaders($trustedHeaders, $trustedProxies);
+
+        // Fallback to REMOTE_ADDR if no valid IP found in headers
+        $this->ip = $ip ?: $remoteAddr;
+
+        return $this->ip;
+    }
+
+    /**
+     * Get IP from trusted proxy headers
+     * 
+     * @param array<string> $trustedHeaders Headers to check
+     * @param array<string> $trustedProxies Trusted proxy IP ranges
+     * @return string|null
+     */
+    protected function getIpFromTrustedHeaders(array $trustedHeaders, array $trustedProxies): ?string
+    {
+        foreach ($trustedHeaders as $header) {
+            $ip = match ($header) {
+                'X_FORWARDED_FOR' => $this->getIpFromXForwardedFor($trustedProxies),
+                'X_FORWARDED_HOST' => $this->server('HTTP_X_FORWARDED_HOST'),
+                'X_REAL_IP' => $this->server('HTTP_X_REAL_IP'),
+                'FORWARDED' => $this->getIpFromForwarded(),
+                default => null,
+            };
+
+            // Found valid IP
+            if ($ip && IpAddress::isValid($ip, allowPrivate: false)) {
+                return $ip;
             }
         }
-        
-        $this->ip = $this->server('REMOTE_ADDR', '127.0.0.1');
-        return $this->ip;
+
+        return null;
+    }
+
+    /**
+     * Get IP from X-Forwarded-For header
+     * 
+     * Parses the X-Forwarded-For chain and returns the real client IP
+     * by skipping trusted proxies.
+     * 
+     * @param array<string> $trustedProxies Trusted proxy IP ranges
+     * @return string|null
+     */
+    protected function getIpFromXForwardedFor(array $trustedProxies): ?string
+    {
+        $header = $this->server('HTTP_X_FORWARDED_FOR');
+
+        if (!$header) {
+            return null;
+        }
+
+        return IpAddress::getRealIpFromChain($header, $trustedProxies);
+    }
+
+    /**
+     * Get IP from Forwarded header (RFC 7239)
+     * 
+     * Parses the standard Forwarded header format:
+     * Forwarded: for=192.0.2.60;proto=http;by=203.0.113.43
+     * 
+     * @return string|null
+     */
+    protected function getIpFromForwarded(): ?string
+    {
+        $header = $this->server('HTTP_FORWARDED');
+
+        if (!$header) {
+            return null;
+        }
+
+        // Parse RFC 7239 format: for=192.0.2.60
+        if (preg_match('/for=(["\[]?)([a-f0-9\.:]+)\1/i', $header, $matches)) {
+            return $matches[2];
+        }
+
+        return null;
     }
 
     /**
@@ -483,7 +570,7 @@ class Request
      */
     public function isSecure(): bool
     {
-        return $this->server('HTTPS') === 'on' 
+        return $this->server('HTTPS') === 'on'
             || $this->server('HTTP_X_FORWARDED_PROTO') === 'https'
             || $this->server('HTTP_X_FORWARDED_SSL') === 'on';
     }
@@ -511,11 +598,11 @@ class Request
     public function bearerToken(): ?string
     {
         $auth = $this->header('Authorization', '');
-        
+
         if (preg_match('/Bearer\s+(.+)/i', $auth, $matches)) {
             return $matches[1];
         }
-        
+
         return null;
     }
 
@@ -527,7 +614,7 @@ class Request
         if ($this->rawBody === null) {
             $this->rawBody = file_get_contents('php://input');
         }
-        
+
         return $this->rawBody;
     }
 }

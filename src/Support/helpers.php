@@ -13,6 +13,7 @@ declare(strict_types=1);
 use Zephyr\Core\App;
 use Zephyr\Support\Config;
 use Zephyr\Support\Env;
+use Zephyr\Http\Request;
 
 if (!function_exists('app')) {
     /**
@@ -121,5 +122,21 @@ if (!function_exists('now')) {
     function now(): \DateTimeImmutable
     {
         return new \DateTimeImmutable('now', new \DateTimeZone(config('app.timezone', 'UTC')));
+    }
+}
+
+if (!function_exists('ip_address')) {
+    /**
+     * Get client IP address
+     */
+    function ip_address(): string
+    {
+        if (isset($_SERVER['REQUEST_TIME_FLOAT'])) {
+            // In HTTP request context
+            return app(Request::class)->ip();
+        }
+        
+        // In CLI context
+        return '127.0.0.1';
     }
 }
