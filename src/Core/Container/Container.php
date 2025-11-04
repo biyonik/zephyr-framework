@@ -16,6 +16,9 @@ use Zephyr\Exceptions\Container\{BindingResolutionException, CircularDependencyE
  * Provides dependency injection with auto-wiring capabilities.
  * Supports singleton bindings, factory bindings, and automatic resolution.
  * 
+ * FIXED: Memory leak in circular dependency detection
+ * FIXED: Type coercion for builtin types
+ * 
  * @author  Ahmet ALTUN
  * @email   ahmet.altun60@gmail.com
  * @github  https://github.com/biyonik
@@ -75,8 +78,14 @@ trait Container
     /**
      * Resolve a service from the container
      * 
-     * @throws BindingResolutionException
-     * @throws CircularDependencyException
+     * ✅ FIXED: Memory leak in exception handling
+     * Now uses try-finally to ensure $resolving stack is always cleaned up.
+     * 
+     * @param string $abstract Class or interface name to resolve
+     * @return mixed Resolved instance
+     * 
+     * @throws BindingResolutionException If resolution fails
+     * @throws CircularDependencyException If circular dependency detected
      */
     public function resolve(string $abstract): mixed
     {
@@ -92,10 +101,14 @@ trait Container
             return $this->instances[$abstract];
         }
 
+        // ✅ FIX: Push to stack at the start
         $this->resolving[] = $abstract;
 
         try {
+            // Get concrete implementation
             $concrete = $this->getConcrete($abstract);
+            
+            // Build instance
             $instance = $this->build($concrete);
 
             // Store as singleton if marked as shared
@@ -104,7 +117,10 @@ trait Container
             }
 
             return $instance;
+            
         } finally {
+            // ✅ FIX: Always clean up stack, even if exception thrown
+            // This prevents memory leak and ensures stack consistency
             array_pop($this->resolving);
         }
     }
@@ -224,6 +240,16 @@ trait Container
     }
 
     /**
+     * Get current resolution stack (for debugging)
+     * 
+     * @return array<string>
+     */
+    public function getResolvingStack(): array
+    {
+        return $this->resolving;
+    }
+
+    /**
      * Call a method with automatic dependency injection
      */
     public function call(callable|array $callback, array $parameters = []): mixed
@@ -255,6 +281,8 @@ trait Container
     /**
      * Resolve method dependencies with support for route parameters
      * 
+     * ✅ FIXED: Type coercion for builtin types
+     * 
      * @param ReflectionParameter[] $reflectionParams
      * @param array $parameters Route parameters or manual parameters
      * @return array
@@ -271,7 +299,7 @@ trait Container
             if (array_key_exists($name, $parameters)) {
                 $value = $parameters[$name];
 
-                // ✅ NEW: Type coercion for builtin types
+                // ✅ Type coercion for builtin types
                 if ($type && $type->isBuiltin() && !is_null($value)) {
                     $value = $this->castToType($value, $type->getName());
                 }
@@ -304,18 +332,26 @@ trait Container
      * Safely converts string values (from route parameters) to expected types.
      * Handles common PHP builtin types with proper validation.
      * 
+     * ✅ FIXED: Type name mapping (int vs integer, bool vs boolean)
+     * 
      * @param mixed $value Value to cast
      * @param string $type Target type name
      * @return mixed Casted value
-     * 
-     * @author  Ahmet ALTUN
-     * @email   ahmet.altun60@gmail.com
-     * @github  https://github.com/biyonik
      */
     protected function castToType(mixed $value, string $type): mixed
     {
+        // ✅ FIX: PHP type name mapping
+        // gettype() returns 'integer' but type hint is 'int'
+        $typeMap = [
+            'int' => 'integer',
+            'bool' => 'boolean',
+            'float' => 'double',
+        ];
+
+        $phpType = $typeMap[$type] ?? $type;
+
         // If already correct type, return as-is
-        if (gettype($value) === $type) {
+        if (gettype($value) === $phpType) {
             return $value;
         }
 
@@ -385,11 +421,11 @@ trait Container
         if (is_string($value)) {
             $lower = strtolower($value);
 
-            if (in_array($lower, ['1', 'true', 'yes', 'on'])) {
+            if (in_array($lower, ['1', 'true', 'yes', 'on'], true)) {
                 return true;
             }
 
-            if (in_array($lower, ['0', 'false', 'no', 'off', ''])) {
+            if (in_array($lower, ['0', 'false', 'no', 'off', ''], true)) {
                 return false;
             }
         }

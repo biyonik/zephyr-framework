@@ -80,11 +80,22 @@ try {
 
     /*
     |--------------------------------------------------------------------------
-    | Handle The Request
+    | Capture & Register HTTP Request
     |--------------------------------------------------------------------------
     */
 
     $request = Request::capture();
+    
+    // ✅ CRITICAL FIX: Register request instance in container
+    // This allows dependency injection to work properly for Request type hints
+    $app->instance(Request::class, $request);
+
+    /*
+    |--------------------------------------------------------------------------
+    | Handle The Request
+    |--------------------------------------------------------------------------
+    */
+
     $response = $app->handle($request);
     $response->send();
 

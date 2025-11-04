@@ -153,6 +153,16 @@ class Request
 
     /**
      * Parse request body
+     * 
+     * ✅ FIXED: JSON parsing error handling
+     * Now throws BadRequestException on invalid JSON instead of
+     * silently returning empty array.
+     * 
+     * @param string $method HTTP method
+     * @param string $contentType Content-Type header
+     * @return array Parsed body data
+     * 
+     * @throws BadRequestException If JSON is invalid
      */
     protected static function parseBody(string $method, string $contentType): array
     {
@@ -168,12 +178,26 @@ class Request
             return $_POST;
         }
 
-        // Parse based on content type
+        // ✅ Parse JSON with error handling
         if (str_contains($contentType, 'application/json')) {
             $data = json_decode($rawBody, true);
+
+            // ✅ FIX: Check for JSON errors
+            $jsonError = json_last_error();
+
+            if ($jsonError !== JSON_ERROR_NONE) {
+                $errorMessage = static::getJsonErrorMessage($jsonError);
+
+                throw new \Zephyr\Exceptions\Http\BadRequestException(
+                    "Invalid JSON in request body: {$errorMessage}"
+                );
+            }
+
+            // ✅ Ensure we return array (json_decode can return null)
             return is_array($data) ? $data : [];
         }
 
+        // Parse URL-encoded data
         if (str_contains($contentType, 'application/x-www-form-urlencoded')) {
             parse_str($rawBody, $data);
             return $data;
@@ -181,6 +205,29 @@ class Request
 
         // Default to $_POST for form data
         return $_POST;
+    }
+
+    /**
+     * Get human-readable JSON error message
+     * 
+     * @param int $errorCode JSON error code from json_last_error()
+     * @return string Human-readable error message
+     */
+    protected static function getJsonErrorMessage(int $errorCode): string
+    {
+        return match ($errorCode) {
+            JSON_ERROR_DEPTH => 'Maximum stack depth exceeded',
+            JSON_ERROR_STATE_MISMATCH => 'Invalid or malformed JSON',
+            JSON_ERROR_CTRL_CHAR => 'Unexpected control character found',
+            JSON_ERROR_SYNTAX => 'Syntax error, malformed JSON',
+            JSON_ERROR_UTF8 => 'Malformed UTF-8 characters, possibly incorrectly encoded',
+            JSON_ERROR_RECURSION => 'One or more recursive references in the value',
+            JSON_ERROR_INF_OR_NAN => 'One or more NAN or INF values',
+            JSON_ERROR_UNSUPPORTED_TYPE => 'A value of a type that cannot be encoded',
+            JSON_ERROR_INVALID_PROPERTY_NAME => 'Invalid property name',
+            JSON_ERROR_UTF16 => 'Malformed UTF-16 characters',
+            default => 'Unknown JSON error',
+        };
     }
 
     /**

@@ -129,10 +129,10 @@ class App
     public function loadConfiguration(): void
     {
         Config::load($this->basePath . '/config');
-        
+
         // Set default timezone
         date_default_timezone_set(Config::get('app.timezone', 'UTC'));
-        
+
         // Set error reporting based on debug mode
         if (Config::get('app.debug', false)) {
             error_reporting(E_ALL);
@@ -167,7 +167,7 @@ class App
         }
 
         $instance = new $provider($this);
-        
+
         if (method_exists($instance, 'register')) {
             $instance->register();
         }
@@ -200,14 +200,14 @@ class App
     public function handle(Request $request): Response
     {
         try {
-            // Get HTTP kernel
+            // ✅ Ensure request is in container (defensive)
+            if (!$this->has(Request::class)) {
+                $this->instance(Request::class, $request);
+            }
+
             $kernel = $this->getKernel();
-            
-            // Handle the request through kernel
             return $kernel->handle($request);
-            
         } catch (\Throwable $e) {
-            // Handle exceptions
             $handler = $this->resolve(ExceptionHandler::class);
             return $handler->handle($e, $request);
         }
@@ -298,9 +298,7 @@ class App
     /**
      * Prevent cloning (singleton pattern)
      */
-    private function __clone()
-    {
-    }
+    private function __clone() {}
 
     /**
      * Prevent unserialization (singleton pattern)

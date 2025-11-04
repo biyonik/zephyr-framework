@@ -11,7 +11,7 @@ use Zephyr\Http\{Request, Response};
  * Route Instance
  * 
  * Represents a single route with its pattern, action, and middleware.
- * Handles pattern compilation and parameter extraction.
+ * Handles pattern compilation and parameter extraction with constraint validation.
  * 
  * @author  Ahmet ALTUN
  * @email   ahmet.altun60@gmail.com
@@ -60,9 +60,21 @@ class Route
     protected ?string $name = null;
 
     /**
-     * Where constraints
+     * Where constraints for parameters
+     * 
+     * @var array<string, string>
      */
     protected array $wheres = [];
+
+    /**
+     * Default constraint patterns for parameter types
+     */
+    protected const DEFAULT_CONSTRAINTS = [
+        'id' => '[0-9]+',           // Numeric IDs
+        'uuid' => '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}',
+        'slug' => '[a-z0-9]+(?:-[a-z0-9]+)*',  // URL-friendly slugs
+        'hash' => '[a-zA-Z0-9]+',   // Alphanumeric hash
+    ];
 
     /**
      * Constructor
@@ -76,11 +88,21 @@ class Route
     }
 
     /**
-     * Compile the route pattern to regex
+     * Compile the route pattern to regex with constraint validation
+     * 
+     * Transforms route patterns like:
+     * - /users/{id} → ^/users/([^/]+)$
+     * - /users/{id} with where('id', '[0-9]+') → ^/users/([0-9]+)$
+     * - /posts/{slug?} → ^/posts/?([^/]*)$
+     * 
+     * Constraint priority:
+     * 1. Explicit where() constraints
+     * 2. Default constraints for known parameter names (id, uuid, etc.)
+     * 3. Generic constraint ([^/]+ for required, [^/]* for optional)
      */
     protected function compile(): void
     {
-        // Reset
+        // Reset compilation state
         $this->parameterNames = [];
         
         // Check if it's a static route (no parameters)
@@ -91,30 +113,75 @@ class Route
         
         $pattern = $this->uri;
         
-        // Extract parameter names and replace with regex
-        // {id} -> ([^/]+)
-        // {slug?} -> ([^/]*)
+        // ✅ FIX 1: Handle optional parameters with constraints
+        // Pattern: {slug?} → /?constraint (slash is optional too)
         $pattern = preg_replace_callback(
             '/\{([a-zA-Z_][a-zA-Z0-9_]*)\?\}/',
             function ($matches) {
-                $this->parameterNames[] = $matches[1];
-                $constraint = $this->wheres[$matches[1]] ?? '[^/]*';
-                return "({$constraint})";
+                $paramName = $matches[1];
+                $this->parameterNames[] = $paramName;
+                
+                // Get constraint: explicit > default > generic
+                $constraint = $this->getConstraintForParameter($paramName, true);
+                
+                // Make the preceding slash optional too
+                return "/?({$constraint})";
             },
             $pattern
         );
         
+        // ✅ FIX 2: Handle required parameters with constraints
+        // Pattern: {id} → constraint from $this->wheres or default
         $pattern = preg_replace_callback(
             '/\{([a-zA-Z_][a-zA-Z0-9_]*)\}/',
             function ($matches) {
-                $this->parameterNames[] = $matches[1];
-                $constraint = $this->wheres[$matches[1]] ?? '[^/]+';
+                $paramName = $matches[1];
+                $this->parameterNames[] = $paramName;
+                
+                // Get constraint: explicit > default > generic
+                $constraint = $this->getConstraintForParameter($paramName, false);
+                
                 return "({$constraint})";
             },
             $pattern
         );
         
+        // ✅ FIX 3: Build full regex with anchors
         $this->regex = '#^' . $pattern . '$#';
+    }
+
+    /**
+     * Get constraint pattern for a parameter
+     * 
+     * Priority:
+     * 1. Explicit where() constraint
+     * 2. Default constraint for known parameter names
+     * 3. Generic constraint
+     * 
+     * @param string $paramName Parameter name
+     * @param bool $optional Whether parameter is optional
+     * @return string Regex constraint pattern
+     */
+    protected function getConstraintForParameter(string $paramName, bool $optional): string
+    {
+        // Priority 1: Explicit where() constraint
+        if (isset($this->wheres[$paramName])) {
+            $constraint = $this->wheres[$paramName];
+            
+            // For optional parameters, make constraint optional too
+            return $optional ? "{$constraint}*" : $constraint;
+        }
+        
+        // Priority 2: Default constraint for known parameter names
+        if (isset(self::DEFAULT_CONSTRAINTS[$paramName])) {
+            $constraint = self::DEFAULT_CONSTRAINTS[$paramName];
+            
+            // For optional parameters, make constraint optional
+            return $optional ? "(?:{$constraint})?" : $constraint;
+        }
+        
+        // Priority 3: Generic constraint
+        return $optional ? '[^/]*' : '[^/]+';
     }
 
     /**
@@ -131,7 +198,7 @@ class Route
             return $uri === $routeUri;
         }
         
-        // Dynamic route check
+        // ✅ Dynamic route check with constraint validation
         return (bool) preg_match($this->regex, $uri);
     }
 
@@ -146,7 +213,9 @@ class Route
         }
         
         // Extract values using regex
-        preg_match($this->regex, $uri, $matches);
+        if (!preg_match($this->regex, $uri, $matches)) {
+            return [];
+        }
         
         // Remove the full match
         array_shift($matches);
@@ -154,7 +223,10 @@ class Route
         // Combine parameter names with values
         $parameters = [];
         foreach ($this->parameterNames as $index => $name) {
-            $parameters[$name] = $matches[$index] ?? null;
+            $value = $matches[$index] ?? null;
+            
+            // ✅ Convert empty string to null for optional parameters
+            $parameters[$name] = ($value === '' || $value === null) ? null : $value;
         }
         
         return $parameters;
@@ -172,7 +244,6 @@ class Route
         
         // Handle Closure action
         if ($action instanceof Closure) {
-            // Pass both Request (via DI) and parameters (as named args)
             $result = app()->call($action, $parameters);
             return $this->prepareResponse($result);
         }
@@ -199,7 +270,6 @@ class Route
         $instance = app()->resolve($controller);
         
         // Call controller method with dependency injection
-        // The container will inject Request and any route parameters
         $result = app()->call([$instance, $method], $parameters);
         
         return $this->prepareResponse($result);
@@ -267,6 +337,23 @@ class Route
 
     /**
      * Add where constraint
+     * 
+     * @param string|array $name Parameter name or array of [name => constraint]
+     * @param string|null $expression Regex constraint expression
+     * @return self
+     * 
+     * @example Single constraint
+     * ```php
+     * $route->where('id', '[0-9]+');
+     * ```
+     * 
+     * @example Multiple constraints
+     * ```php
+     * $route->where([
+     *     'id' => '[0-9]+',
+     *     'slug' => '[a-z0-9-]+'
+     * ]);
+     * ```
      */
     public function where(string|array $name, ?string $expression = null): self
     {
@@ -276,10 +363,105 @@ class Route
             $this->wheres[$name] = $expression;
         }
         
-        // Recompile with new constraints
+        // ✅ Recompile route with new constraints
         $this->compile();
         
         return $this;
+    }
+
+    /**
+     * Add numeric constraint (shorthand for where with [0-9]+)
+     * 
+     * @param string|array $parameters Parameter name(s)
+     * @return self
+     * 
+     * @example
+     * ```php
+     * $route->whereNumber('id');
+     * $route->whereNumber(['id', 'page']);
+     * ```
+     */
+    public function whereNumber(string|array $parameters): self
+    {
+        $parameters = (array) $parameters;
+        
+        foreach ($parameters as $parameter) {
+            $this->where($parameter, '[0-9]+');
+        }
+        
+        return $this;
+    }
+
+    /**
+     * Add alpha constraint (shorthand for where with [a-zA-Z]+)
+     * 
+     * @param string|array $parameters Parameter name(s)
+     * @return self
+     */
+    public function whereAlpha(string|array $parameters): self
+    {
+        $parameters = (array) $parameters;
+        
+        foreach ($parameters as $parameter) {
+            $this->where($parameter, '[a-zA-Z]+');
+        }
+        
+        return $this;
+    }
+
+    /**
+     * Add alphanumeric constraint (shorthand for where with [a-zA-Z0-9]+)
+     * 
+     * @param string|array $parameters Parameter name(s)
+     * @return self
+     */
+    public function whereAlphaNumeric(string|array $parameters): self
+    {
+        $parameters = (array) $parameters;
+        
+        foreach ($parameters as $parameter) {
+            $this->where($parameter, '[a-zA-Z0-9]+');
+        }
+        
+        return $this;
+    }
+
+    /**
+     * Add UUID constraint
+     * 
+     * @param string|array $parameters Parameter name(s)
+     * @return self
+     */
+    public function whereUuid(string|array $parameters): self
+    {
+        $parameters = (array) $parameters;
+        
+        foreach ($parameters as $parameter) {
+            $this->where($parameter, '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}');
+        }
+        
+        return $this;
+    }
+
+    /**
+     * Add 'in' constraint (value must be in list)
+     * 
+     * @param string $parameter Parameter name
+     * @param array $values Allowed values
+     * @return self
+     * 
+     * @example
+     * ```php
+     * $route->whereIn('status', ['active', 'inactive', 'pending']);
+     * ```
+     */
+    public function whereIn(string $parameter, array $values): self
+    {
+        // Escape values and join with |
+        $escaped = array_map(fn($v) => preg_quote((string) $v, '#'), $values);
+        $pattern = implode('|', $escaped);
+        
+        return $this->where($parameter, "(?:{$pattern})");
     }
 
     /**
@@ -337,5 +519,23 @@ class Route
     public function getName(): ?string
     {
         return $this->name;
+    }
+
+    /**
+     * Get route constraints
+     * 
+     * @return array<string, string>
+     */
+    public function getWheres(): array
+    {
+        return $this->wheres;
+    }
+
+    /**
+     * Get compiled regex pattern
+     */
+    public function getRegex(): ?string
+    {
+        return $this->regex;
     }
 }
