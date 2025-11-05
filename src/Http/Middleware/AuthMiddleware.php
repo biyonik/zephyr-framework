@@ -7,13 +7,17 @@ namespace Zephyr\Http\Middleware;
 use Closure;
 use Zephyr\Http\{Request, Response};
 use Zephyr\Exceptions\Http\UnauthorizedException;
+use Zephyr\Support\Config; //
+use Firebase\JWT\JWT;
+use Firebase\JWT\Key;
+use Firebase\JWT\ExpiredException;
+use Firebase\JWT\SignatureInvalidException;
+use UnexpectedValueException;
 
 /**
  * Authentication Middleware
  *
- * Ensures the request is authenticated before proceeding.
- *
- * TODO: This is a skeleton. Will be fully implemented when JWT auth is ready.
+ * Gelen isteğin geçerli bir JWT token'a sahip olup olmadığını doğrular.
  *
  * @author  Ahmet ALTUN
  * @email   ahmet.altun60@gmail.com
@@ -33,59 +37,45 @@ class AuthMiddleware implements MiddlewareInterface
     public function handle(Request $request, Closure $next): Response
     {
         // Get token from Authorization header
-        $token = $request->bearerToken();
+        $token = $request->bearerToken(); //
 
         if (!$token) {
             throw new UnauthorizedException('Authentication required');
         }
 
-        // TODO: Validate JWT token here
-        // For now, just check if token exists
-        // In future:
-        // 1. Decode JWT
-        // 2. Verify signature
-        // 3. Check expiry
-        // 4. Load user from token
-        // 5. Inject user into request
+        // Get config settings
+        $secret = Config::get('auth.jwt.secret');
+        $algo = Config::get('auth.jwt.algo');
 
-        // Placeholder validation
-        if (strlen($token) < 10) {
-            throw new UnauthorizedException('Invalid authentication token');
+        if (empty($secret)) {
+            throw new \RuntimeException('JWT_SECRET is not defined in your environment file.');
+        }
+
+        try {
+            // Decode and validate the token
+            $decoded = JWT::decode($token, new Key($secret, $algo));
+
+            // Token geçerli. Kullanıcı bilgilerini (payload)
+            // daha sonra erişebilmek için container'a kaydedelim.
+            // Not: $decoded->data (veya $decoded->sub) token'ı nasıl
+            // oluşturduğunuza bağlı olarak değişir. Biz tüm payload'ı saklayalım.
+            app()->instance('auth.user', $decoded); //
+
+        } catch (ExpiredException $e) {
+            // Token'ın süresi dolmuş
+            throw new UnauthorizedException('Token has expired');
+        } catch (SignatureInvalidException $e) {
+            // İmza geçersiz
+            throw new UnauthorizedException('Invalid token signature');
+        } catch (UnexpectedValueException $e) {
+            // Token formatı bozuk veya algoritma eşleşmiyor
+            throw new UnauthorizedException('Invalid token');
+        } catch (\Exception $e) {
+            // Diğer tüm JWT veya beklenmedik hatalar
+            throw new UnauthorizedException('Invalid authentication token: ' . $e->getMessage());
         }
 
         // Continue to next middleware/controller
         return $next($request);
-    }
-
-    /**
-     * Validate JWT token (placeholder)
-     *
-     * TODO: Implement actual JWT validation
-     *
-     * @param string $token
-     * @return bool
-     */
-    protected function validateToken(string $token): bool
-    {
-        // TODO: Implement JWT validation
-        // Will use firebase/php-jwt library
-
-        return !empty($token);
-    }
-
-    /**
-     * Get user from token (placeholder)
-     *
-     * TODO: Implement user retrieval from JWT payload
-     *
-     * @param string $token
-     * @return mixed
-     */
-    protected function getUserFromToken(string $token): mixed
-    {
-        // TODO: Decode JWT and get user data
-        // Will query database based on user ID from token
-
-        return null;
     }
 }

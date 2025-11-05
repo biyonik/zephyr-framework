@@ -43,7 +43,9 @@ class Kernel
         // Global middleware will be registered here
         // Example:
         // \Zephyr\Http\Middleware\TrustedProxies::class,
-        // \Zephyr\Http\Middleware\Cors::class,
+        \Zephyr\Http\Middleware\CorsMiddleware::class,
+        \Zephyr\Http\Middleware\RateLimitMiddleware::class,
+        \Zephyr\Http\Middleware\AuthMiddleware::class,
     ];
 
     /**
