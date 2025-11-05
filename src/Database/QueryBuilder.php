@@ -590,7 +590,6 @@ class QueryBuilder
             $statement->execute($bindings);
 
             return $statement->fetchAll();
-
         } catch (\PDOException $e) {
             throw new DatabaseException(
                 "Query failed: {$e->getMessage()}",
@@ -605,12 +604,20 @@ class QueryBuilder
     /**
      * Execute query and get first result
      *
-     * @return array|null First row or null
+     * Note: Return type is mixed to allow child classes (Model Builder) 
+     * to return specific types (?Model instead of ?array).
+     * This enables covariant return types in the Builder class.
+     *
+     * @return mixed First row as array, Model instance (in Builder), or null
      *
      * @example
-     * $user = $query->where('id', '=', 1)->first();
+     * // In QueryBuilder
+     * $row = DB::table('users')->first();  // Returns ?array
+     * 
+     * // In Model Builder
+     * $user = User::query()->first();  // Returns ?Model
      */
-    public function first(): ?array
+    public function first(): mixed
     {
         $this->limit(1);
         $results = $this->get();
@@ -745,7 +752,6 @@ class QueryBuilder
             $statement->execute($values);
 
             return $pdo->lastInsertId();
-
         } catch (\PDOException $e) {
             throw new DatabaseException(
                 "Insert failed: {$e->getMessage()}",
@@ -784,7 +790,6 @@ class QueryBuilder
 
             $this->connection->commit();
             return true;
-
         } catch (\Throwable $e) {
             $this->connection->rollback();
             throw $e;
@@ -826,7 +831,6 @@ class QueryBuilder
             $statement->execute($values);
 
             return $statement->rowCount();
-
         } catch (\PDOException $e) {
             throw new DatabaseException(
                 "Update failed: {$e->getMessage()}",
@@ -861,7 +865,6 @@ class QueryBuilder
             $statement->execute($this->bindings);
 
             return $statement->rowCount();
-
         } catch (\PDOException $e) {
             throw new DatabaseException(
                 "Delete failed: {$e->getMessage()}",
@@ -885,7 +888,6 @@ class QueryBuilder
             $this->connection->getPdo()->exec($sql);
 
             return true;
-
         } catch (\PDOException $e) {
             throw new DatabaseException(
                 "Truncate failed: {$e->getMessage()}",
@@ -966,7 +968,6 @@ class QueryBuilder
             $this->connection->commit();
 
             return $result;
-
         } catch (\Throwable $e) {
             $this->connection->rollback();
             throw $e;
@@ -1018,7 +1019,6 @@ class QueryBuilder
             }
 
             $page++;
-
         } while (count($results) === $size);
 
         return true;

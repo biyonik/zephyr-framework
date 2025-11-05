@@ -19,9 +19,6 @@ use Zephyr\Support\Env;
 use Zephyr\Http\Request;
 
 if (!function_exists('app')) {
-    /**
-     * Get the application instance or resolve a service
-     */
     function app(?string $abstract = null): mixed
     {
         if (is_null($abstract)) {
@@ -33,9 +30,6 @@ if (!function_exists('app')) {
 }
 
 if (!function_exists('config')) {
-    /**
-     * Get configuration value
-     */
     function config(string $key, mixed $default = null): mixed
     {
         return Config::get($key, $default);
@@ -43,9 +37,6 @@ if (!function_exists('config')) {
 }
 
 if (!function_exists('env')) {
-    /**
-     * Get environment variable value
-     */
     function env(string $key, mixed $default = null): mixed
     {
         return Env::get($key, $default);
@@ -53,9 +44,6 @@ if (!function_exists('env')) {
 }
 
 if (!function_exists('base_path')) {
-    /**
-     * Get the base path of the application
-     */
     function base_path(string $path = ''): string
     {
         $basePath = app()->basePath();
@@ -65,9 +53,6 @@ if (!function_exists('base_path')) {
 }
 
 if (!function_exists('storage_path')) {
-    /**
-     * Get the storage path
-     */
     function storage_path(string $path = ''): string
     {
         return base_path('storage' . ($path ? DIRECTORY_SEPARATOR . ltrim($path, '/\\') : ''));
@@ -75,9 +60,6 @@ if (!function_exists('storage_path')) {
 }
 
 if (!function_exists('config_path')) {
-    /**
-     * Get the config path
-     */
     function config_path(string $path = ''): string
     {
         return base_path('config' . ($path ? DIRECTORY_SEPARATOR . ltrim($path, '/\\') : ''));
@@ -85,9 +67,6 @@ if (!function_exists('config_path')) {
 }
 
 if (!function_exists('response')) {
-    /**
-     * Create a response instance
-     */
     function response(mixed $content = '', int $status = 200, array $headers = []): Response
     {
         return new Response($content, $status, $headers);
@@ -95,9 +74,6 @@ if (!function_exists('response')) {
 }
 
 if (!function_exists('dd')) {
-    /**
-     * Dump and die (development helper)
-     */
     function dd(mixed ...$vars): never
     {
         foreach ($vars as $var) {
@@ -108,10 +84,16 @@ if (!function_exists('dd')) {
     }
 }
 
+if (!function_exists('dump')) {
+    function dump(mixed ...$vars): void
+    {
+        foreach ($vars as $var) {
+            var_dump($var);
+        }
+    }
+}
+
 if (!function_exists('value')) {
-    /**
-     * Return the value of the given value
-     */
     function value(mixed $value, mixed ...$args): mixed
     {
         return $value instanceof Closure ? $value(...$args) : $value;
@@ -119,43 +101,31 @@ if (!function_exists('value')) {
 }
 
 if (!function_exists('now')) {
-    /**
-     * Get current datetime
-     * @throws Exception
-     */
     function now(): DateTimeImmutable
     {
         return new DateTimeImmutable('now', new DateTimeZone(config('app.timezone', 'UTC')));
     }
 }
 
+if (!function_exists('today')) {
+    function today(): DateTime
+    {
+        return (new DateTime('now', new DateTimeZone(config('app.timezone', 'UTC'))))->setTime(0, 0);
+    }
+}
+
 if (!function_exists('ip_address')) {
-    /**
-     * Get client IP address
-     */
     function ip_address(): string
     {
         if (isset($_SERVER['REQUEST_TIME_FLOAT'])) {
-            // In HTTP request context
             return app(Request::class)->ip();
         }
         
-        // In CLI context
         return '127.0.0.1';
     }
 }
 
 if (!function_exists('db')) {
-    /**
-     * Get query builder instance
-     *
-     * @param string|null $table Optional table name
-     * @return QueryBuilder|Connection
-     *
-     * @example
-     * db('users')->where('status', '=', 'active')->get();
-     * db()->raw('SELECT * FROM users');
-     */
     function db(?string $table = null): QueryBuilder|Connection
     {
         $connection = Connection::getInstance();
@@ -165,5 +135,137 @@ if (!function_exists('db')) {
         }
 
         return (new QueryBuilder($connection))->from($table);
+    }
+}
+
+if (!function_exists('class_basename')) {
+    function class_basename(string|object $class): string
+    {
+        $class = is_object($class) ? get_class($class) : $class;
+
+        return basename(str_replace('\\', '/', $class));
+    }
+}
+
+if (!function_exists('collect')) {
+    function collect(mixed $value = []): \Zephyr\Support\Collection
+    {
+        return new \Zephyr\Support\Collection($value);
+    }
+}
+
+if (!function_exists('str_contains')) {
+    function str_contains(string $haystack, string $needle): bool
+    {
+        return $needle !== '' && mb_strpos($haystack, $needle) !== false;
+    }
+}
+
+if (!function_exists('str_starts_with')) {
+    function str_starts_with(string $haystack, string $needle): bool
+    {
+        return $needle !== '' && strncmp($haystack, $needle, strlen($needle)) === 0;
+    }
+}
+
+if (!function_exists('str_ends_with')) {
+    function str_ends_with(string $haystack, string $needle): bool
+    {
+        return $needle !== '' && substr($haystack, -strlen($needle)) === $needle;
+    }
+}
+
+if (!function_exists('array_get')) {
+    function array_get(array $array, string $key, mixed $default = null): mixed
+    {
+        if (isset($array[$key])) {
+            return $array[$key];
+        }
+
+        foreach (explode('.', $key) as $segment) {
+            if (!is_array($array) || !array_key_exists($segment, $array)) {
+                return value($default);
+            }
+
+            $array = $array[$segment];
+        }
+
+        return $array;
+    }
+}
+
+if (!function_exists('array_set')) {
+    function array_set(array &$array, string $key, mixed $value): array
+    {
+        $keys = explode('.', $key);
+
+        while (count($keys) > 1) {
+            $key = array_shift($keys);
+
+            if (!isset($array[$key]) || !is_array($array[$key])) {
+                $array[$key] = [];
+            }
+
+            $array = &$array[$key];
+        }
+
+        $array[array_shift($keys)] = $value;
+
+        return $array;
+    }
+}
+
+if (!function_exists('retry')) {
+    function retry(int $times, callable $callback, int $sleep = 0)
+    {
+        $attempts = 0;
+
+        beginning:
+        $attempts++;
+
+        try {
+            return $callback($attempts);
+        } catch (Throwable $e) {
+            if ($attempts >= $times) {
+                throw $e;
+            }
+
+            if ($sleep > 0) {
+                usleep($sleep * 1000);
+            }
+
+            goto beginning;
+        }
+    }
+}
+
+if (!function_exists('tap')) {
+    function tap(mixed $value, ?callable $callback = null): mixed
+    {
+        if (is_null($callback)) {
+            return $value;
+        }
+
+        $callback($value);
+
+        return $value;
+    }
+}
+
+if (!function_exists('with')) {
+    function with(mixed $value, ?callable $callback = null): mixed
+    {
+        return is_null($callback) ? $value : $callback($value);
+    }
+}
+
+if (!function_exists('rescue')) {
+    function rescue(callable $callback, mixed $rescue = null): mixed
+    {
+        try {
+            return $callback();
+        } catch (Throwable $e) {
+            return value($rescue);
+        }
     }
 }
