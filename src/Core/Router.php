@@ -128,7 +128,7 @@ class Router
 
     /**
      * Add a route to the collection
-     * *** GÜNCELLENDİ (optimize:route optimizasyonu için) ***
+     * *** GÜNCELLENDİ (Rapor #1: Route Caching Logic Error) ***
      */
     protected function addRoute(array $methods, string $uri, Closure|array|string $action): Route
     {
@@ -139,23 +139,32 @@ class Router
         $route = new Route($methods, $uri, $action); //
 
         // Apply group middleware
-        if ($middleware = $this->getGroupMiddleware()) { //
-            $route->middleware($middleware); //
+        if ($middleware = $this->getGroupMiddleware()) {
+            $route->middleware($middleware);
         }
 
         // Apply group namespace
-        if ($namespace = $this->getGroupNamespace()) { //
-            $route->namespace($namespace); //
+        if ($namespace = $this->getGroupNamespace()) {
+            $route->namespace($namespace);
         }
+
+        // YENİ: Rota tipini belirle (Controller, Closure, vb.)
+        $actionType = match(true) {
+            is_array($action) => 'controller', // [Controller::class, 'method']
+            $action instanceof Closure => 'closure',
+            is_string($action) => 'controller_string', // 'Controller@method'
+            default => 'unknown'
+        };
 
         // Register route for each method
         foreach ($methods as $method) {
 
-            // *** YENİ: Çift kaydı engelleme kontrolü ***
-            $lookupKey = $method . $uri;
+            // *** YENİ GÜVENLİ ANAHTAR (Rapor #1 Çözümü) ***
+            $lookupKey = $method . '::' . $uri . '::' . $actionType;
+            
             if (isset($this->routeLookup[$lookupKey])) {
-                // Bu rota (muhtemelen önbellekten) zaten eklendi.
-                // Closure olan versiyonu (api.php'den gelen) atlansın.
+                // Bu rota (muhtemelen önbellekten veya
+                // api.php'de çift kayıttan) zaten eklendi.
                 continue;
             }
             // *** YENİ KONTROL SONU ***
@@ -219,7 +228,7 @@ class Router
 
     /**
      * YENİ: Önbelleğe alınmış rotaları doğrudan ayarlar.
-     * Bu metot, public/index.php tarafından çağrılacak.
+     * *** GÜNCELLENDİ (Rapor #1: Route Caching Logic Error) ***
      */
     public function setCachedRoutes(array $routes): void
     {
@@ -229,9 +238,20 @@ class Router
         $this->routeLookup = [];
         foreach ($this->routes as $method => $methodRoutes) {
             foreach ($methodRoutes as $route) {
-                // Not: Bir rotanın birden fazla metodu olabilir (örn. GET ve HEAD)
+                
+                // Önbelleğe SADECE Controller (array) rotalarını aldığımızı biliyoruz.
+                //
+                $action = $route->getAction(); //
+                
+                // Eylem tipini belirle (cache'ten gelenler her zaman array olmalı)
+                $actionType = is_array($action) ? 'controller' : 'unknown_cached_type';
+                
                 foreach ($route->getMethods() as $routeMethod) { //
-                    $this->routeLookup[$routeMethod . $route->getUri()] = true; //
+                    
+                    // *** YENİ GÜVENLİ ANAHTAR (Rapor #1 Çözümü) ***
+                    $lookupKey = $routeMethod . '::' . $route->getUri() . '::' . $actionType;
+                    
+                    $this->routeLookup[$lookupKey] = true; //
                 }
             }
         }

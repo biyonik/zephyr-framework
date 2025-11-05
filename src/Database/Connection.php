@@ -137,7 +137,7 @@ class Connection
             PDO::ATTR_STRINGIFY_FETCHES => false,
         ];
 
-        if ($this->persistent) {
+        if (!empty($this->config['persistent'])) {
             $options[PDO::ATTR_PERSISTENT] = true;
         }
 

@@ -45,7 +45,6 @@ class Kernel
         // \Zephyr\Http\Middleware\TrustedProxies::class,
         \Zephyr\Http\Middleware\CorsMiddleware::class,
         \Zephyr\Http\Middleware\RateLimitMiddleware::class,
-        \Zephyr\Http\Middleware\AuthMiddleware::class,
     ];
 
     /**
@@ -58,7 +57,7 @@ class Kernel
     protected array $routeMiddleware = [
         // Route middleware aliases will be registered here
         // Example:
-        // 'auth' => \Zephyr\Http\Middleware\Authenticate::class,
+        'auth' => \Zephyr\Http\Middleware\AuthMiddleware::class,
         // 'throttle' => \Zephyr\Http\Middleware\ThrottleRequests::class,
     ];
 

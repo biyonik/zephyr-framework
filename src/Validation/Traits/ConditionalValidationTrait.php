@@ -77,6 +77,7 @@ trait ConditionalValidationTrait
 
     /**
      * Önbellekleme destekli doğrulama
+     * (GÜNCELLENDİ - Rapor #4: Validation Cache Memory Leak)
      *
      * @param array<string, mixed> $data Doğrulanacak veri
      * @return ValidationResult
@@ -97,13 +98,27 @@ trait ConditionalValidationTrait
         }
 
         // Doğrulamayı yap
-        $result = $this->validate($data);
+        // Not: validate() metodu ValidationSchema.php'de bulunur
+        // ve bu trait'i kullanan sınıfın o metoda sahip olması gerekir.
+        if (method_exists($this, 'validate')) {
+            $result = $this->validate($data);
+        } else {
+            // validate metodu bulunamazsa (beklenmedik durum), hata döndür
+            $result = new ValidationResult($data);
+            $result->addError('_internal', 'Validation method not found');
+            return $result;
+        }
 
+        // --- YAMA (Rapor #4 Çözümü) ---
         // Önbellek yönetimi - boyut limitini kontrol et
         if (count($this->validationCache) >= $this->cacheLimit) {
-            // En eski girdiyi temizle (FIFO)
-            array_shift($this->validationCache);
+            // array_shift() yerine array_key_first() kullan
+            $firstKey = array_key_first($this->validationCache);
+            if ($firstKey !== null) {
+                unset($this->validationCache[$firstKey]);
+            }
         }
+        // --- YAMA SONU ---
 
         // Sonucu önbelleğe ekle
         $this->validationCache[$cacheKey] = $result;

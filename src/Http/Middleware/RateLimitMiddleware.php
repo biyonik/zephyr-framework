@@ -92,19 +92,40 @@ class RateLimitMiddleware implements MiddlewareInterface
     /**
      * Resolve unique signature for the request
      *
-     * Uses IP address as identifier.
-     * Can be extended to include user ID, API key, etc.
+     * Uses IP address, path, User-Agent, and (if available) User ID
+     * to create a secure request fingerprint.
      *
      * @param Request $request
      * @return string
      */
     protected function resolveRequestSignature(Request $request): string
     {
-        $ip = $request->ip();
-        $route = $request->path();
+        // GÜVENLİK YAMASI: (report.md - Güvenlik Açığı #2)
+        // İmzayı daha güçlü hale getir.
+        
+        $ip = $request->ip(); //
+        $route = $request->path(); //
+        $userAgent = $request->header('User-Agent', 'unknown'); //
+        
+        // Kullanıcı giriş yapmışsa JWT payload'ından 'sub' (subject/ID)
+        // bilgisini al. (Bkz: AuthMiddleware)
+        $userId = 'guest';
+        if (app()->has('auth.user')) { //
+            $userPayload = app('auth.user');
+            // Genellikle JWT 'sub' (subject) alanı kullanıcı ID'sini tutar
+            $userId = $userPayload->sub ?? 'authenticated_user_no_sub';
+        }
 
-        // Create unique key: ip|route
-        return sha1($ip . '|' . $route);
+        // Tüm bileşenleri birleştir
+        $components = [
+            $ip,
+            $route,
+            $userAgent,
+            $userId
+        ];
+
+        // sha1 yerine sha256 kullan (report.md önerisi)
+        return hash('sha256', implode('|', $components));
     }
 
     /**

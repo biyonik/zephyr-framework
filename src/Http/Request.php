@@ -546,7 +546,8 @@ class Request
 
     /**
      * Get IP from trusted proxy headers
-     * 
+     * (GÜNCELLENDİ - Rapor: Request IP Detection Security Gap)
+     *
      * @param array<string> $trustedHeaders Headers to check
      * @param array<string> $trustedProxies Trusted proxy IP ranges
      * @return string|null
@@ -555,15 +556,22 @@ class Request
     {
         foreach ($trustedHeaders as $header) {
             $ip = match ($header) {
+                // X_FORWARDED_FOR zaten kendi içinde doğrulama yapıyor
                 'X_FORWARDED_FOR' => $this->getIpFromXForwardedFor($trustedProxies),
-                'X_FORWARDED_HOST' => $this->server('HTTP_X_FORWARDED_HOST'),
-                'X_REAL_IP' => $this->server('HTTP_X_REAL_IP'),
+
+                // X_REAL_IP için doğrulama eklendi
+                'X_REAL_IP' => $this->validateIpHeader('HTTP_X_REAL_IP'),
+
+                // FORWARDED için doğrulama kendi metoduna taşındı
                 'FORWARDED' => $this->getIpFromForwarded(),
+
+                // X_FORWARDED_HOST, X_FORWARDED_PROTO vb. IP adresi değildir.
                 default => null,
             };
 
-            // Found valid IP
-            if ($ip && IpAddress::isValid($ip, allowPrivate: false)) {
+            // Eğer match bloğundan geçerli (ve null olmayan) bir IP geldiyse,
+            // (Doğrulama artık her metodun kendi içinde yapılıyor)
+            if ($ip) {
                 return $ip;
             }
         }
@@ -572,12 +580,26 @@ class Request
     }
 
     /**
+     * YENİ YARDIMCI METOT: X_REAL_IP gibi tekil header'ları doğrular
+     */
+    protected function validateIpHeader(string $serverKey): ?string
+    {
+        $ip = $this->server($serverKey);
+
+        // allowPrivate: false -> Proxy'den gelen IP'nin public IP olmasını bekleriz
+        // (Eğer özel ağınızda proxy varsa bu bayrağı değiştirmeniz gerekebilir)
+        if ($ip && IpAddress::isValid($ip, allowPrivate: false)) { //
+            return $ip;
+        }
+
+        return null;
+    }
+
+    /**
      * Get IP from X-Forwarded-For header
-     * 
-     * Parses the X-Forwarded-For chain and returns the real client IP
-     * by skipping trusted proxies.
-     * 
-     * @param array<string> $trustedProxies Trusted proxy IP ranges
+     * (Not: Bu metod zaten IpAddress::getRealIpFromChain kullanıyor,
+     * o da IpAddress::isValid'i çağırıyor. Burası zaten güvendeydi.)
+     * * @param array<string> $trustedProxies Trusted proxy IP ranges
      * @return string|null
      */
     protected function getIpFromXForwardedFor(array $trustedProxies): ?string
@@ -588,16 +610,14 @@ class Request
             return null;
         }
 
+        // IpAddress::getRealIpFromChain zaten isValid kontrolü yapıyor.
         return IpAddress::getRealIpFromChain($header, $trustedProxies);
     }
 
     /**
      * Get IP from Forwarded header (RFC 7239)
-     * 
-     * Parses the standard Forwarded header format:
-     * Forwarded: for=192.0.2.60;proto=http;by=203.0.113.43
-     * 
-     * @return string|null
+     * (GÜNCELLENDİ - Rapor: Request IP Detection Security Gap)
+     * * @return string|null
      */
     protected function getIpFromForwarded(): ?string
     {
@@ -609,7 +629,12 @@ class Request
 
         // Parse RFC 7239 format: for=192.0.2.60
         if (preg_match('/for=(["\[]?)([a-f0-9\.:]+)\1/i', $header, $matches)) {
-            return $matches[2];
+            $ip = $matches[2];
+
+            // Doğrulamayı doğrudan buraya ekle
+            if (IpAddress::isValid($ip, allowPrivate: false)) {
+                return $ip;
+            }
         }
 
         return null;
@@ -682,14 +707,14 @@ class Request
         // Gelen tüm veriyi (GET + POST/JSON) doğrula
         $data = $this->all();
 
-        $result = $schema->validate($data); 
+        $result = $schema->validate($data);
 
         if ($result->hasErrors()) { //
             throw new ValidationException(
-                errors: $result->getErrors(), 
+                errors: $result->getErrors(),
                 message: 'Doğrulama hatası'
-            ); 
+            );
         }
-        return $result->getValidData(); 
+        return $result->getValidData();
     }
 }

@@ -12,14 +12,12 @@ use Zephyr\Exceptions\Container\{BindingResolutionException, CircularDependencyE
 
 /**
  * Service Container Implementation
- * 
- * Provides dependency injection with auto-wiring capabilities.
+ * * Provides dependency injection with auto-wiring capabilities.
  * Supports singleton bindings, factory bindings, and automatic resolution.
- * 
- * FIXED: Memory leak in circular dependency detection
+ * * FIXED: Memory leak in circular dependency detection
  * FIXED: Type coercion for builtin types
- * 
- * @author  Ahmet ALTUN
+ * (GÜNCELLENDİ - Rapor #2: Reflection Overhead)
+ * * @author  Ahmet ALTUN
  * @email   ahmet.altun60@gmail.com
  * @github  https://github.com/biyonik
  */
@@ -27,24 +25,29 @@ trait Container
 {
     /**
      * The container's bindings
-     * 
-     * @var array<string, array{concrete: string|Closure, shared: bool}>
+     * * @var array<string, array{concrete: string|Closure, shared: bool}>
      */
     protected array $bindings = [];
 
     /**
      * The container's shared instances (singletons)
-     * 
-     * @var array<string, mixed>
+     * * @var array<string, mixed>
      */
     protected array $instances = [];
 
     /**
      * Stack of currently resolving dependencies (for circular dependency detection)
-     * 
-     * @var array<string>
+     * * @var array<string>
      */
     protected array $resolving = [];
+
+    /**
+     * YENİ: Reflection nesneleri için runtime önbelleği.
+     * (Rapor #2 Çözümü)
+     *
+     * @var array<string, ReflectionClass>
+     */
+    protected array $reflectionCache = [];
 
     /**
      * Register a binding in the container
@@ -77,14 +80,12 @@ trait Container
 
     /**
      * Resolve a service from the container
-     * 
-     * ✅ FIXED: Memory leak in exception handling
-     * Now uses try-finally to ensure $resolving stack is always cleaned up.
-     * 
-     * @param string $abstract Class or interface name to resolve
+     * * (Not: Bu metot App.php'de override edildi,
+     * bu yüzden bu trait'in ana 'resolve' metodu değil,
+     * App.php'deki 'resolve' metodu çalışır.)
+     * * @param string $abstract Class or interface name to resolve
      * @return mixed Resolved instance
-     * 
-     * @throws BindingResolutionException If resolution fails
+     * * @throws BindingResolutionException If resolution fails
      * @throws CircularDependencyException If circular dependency detected
      */
     public function resolve(string $abstract): mixed
@@ -120,7 +121,6 @@ trait Container
             
         } finally {
             // ✅ FIX: Always clean up stack, even if exception thrown
-            // This prevents memory leak and ensures stack consistency
             array_pop($this->resolving);
         }
     }
@@ -147,8 +147,8 @@ trait Container
 
     /**
      * Build an instance of the given concrete
-     * 
-     * @throws BindingResolutionException
+     * (GÜNCELLENDİ - Rapor #2: Reflection Overhead)
+     * * @throws BindingResolutionException
      */
     protected function build(string|Closure $concrete): mixed
     {
@@ -157,15 +157,24 @@ trait Container
             return $concrete($this);
         }
 
-        try {
-            $reflector = new ReflectionClass($concrete);
-        } catch (ReflectionException $e) {
-            throw new BindingResolutionException("Target class [{$concrete}] does not exist.", 0, $e);
+        // --- YENİ: ÖNBELLEK KONTROLÜ (Rapor #2 Çözümü) ---
+        if (isset($this->reflectionCache[$concrete])) {
+            $reflector = $this->reflectionCache[$concrete];
+        } else {
+            // Önbellekte yoksa oluştur ve önbelleğe al
+            try {
+                $reflector = new ReflectionClass($concrete); //
+                $this->reflectionCache[$concrete] = $reflector; // Önbelleğe al
+            } catch (ReflectionException $e) {
+                throw new BindingResolutionException("Target class [{$concrete}] does not exist.", 0, $e); //
+            }
         }
+        // --- YENİ KONTROL SONU ---
+
 
         // Check if class is instantiable
         if (!$reflector->isInstantiable()) {
-            throw new BindingResolutionException("Target class [{$concrete}] is not instantiable.");
+            throw new BindingResolutionException("Target class [{$concrete}] is not instantiable."); //
         }
 
         $constructor = $reflector->getConstructor();
@@ -182,8 +191,7 @@ trait Container
 
     /**
      * Resolve constructor dependencies
-     * 
-     * @param ReflectionParameter[] $parameters
+     * * @param ReflectionParameter[] $parameters
      * @return array
      * @throws BindingResolutionException
      */
@@ -207,6 +215,7 @@ trait Container
             }
 
             // Resolve class dependencies recursively
+            // *** NOT: Burası App::resolve()'u çağırır ***
             $dependencies[] = $this->resolve($type->getName());
         }
 
@@ -229,6 +238,7 @@ trait Container
         $this->bindings = [];
         $this->instances = [];
         $this->resolving = [];
+        $this->reflectionCache = []; // YENİ: Önbelleği de temizle
     }
 
     /**
@@ -241,8 +251,7 @@ trait Container
 
     /**
      * Get current resolution stack (for debugging)
-     * 
-     * @return array<string>
+     * * @return array<string>
      */
     public function getResolvingStack(): array
     {
@@ -261,11 +270,20 @@ trait Container
                 $class = $this->resolve($class);
             }
 
-            $reflector = new ReflectionClass($class);
-            $method = $reflector->getMethod($method);
-            $dependencies = $this->resolveMethodDependencies($method->getParameters(), $parameters);
+            // YENİ: (Rapor #2) build() metodundaki aynı mantığı
+            // buraya da uygulayarak ReflectionClass'ı önbelleğe alalım.
+            $className = get_class($class);
+            if (isset($this->reflectionCache[$className])) {
+                $reflector = $this->reflectionCache[$className];
+            } else {
+                $reflector = new ReflectionClass($class);
+                $this->reflectionCache[$className] = $reflector;
+            }
+            
+            $methodReflector = $reflector->getMethod($method);
+            $dependencies = $this->resolveMethodDependencies($methodReflector->getParameters(), $parameters);
 
-            return $method->invokeArgs($class, $dependencies);
+            return $methodReflector->invokeArgs($class, $dependencies);
         }
 
         // For closures and functions
@@ -280,10 +298,8 @@ trait Container
 
     /**
      * Resolve method dependencies with support for route parameters
-     * 
-     * ✅ FIXED: Type coercion for builtin types
-     * 
-     * @param ReflectionParameter[] $reflectionParams
+     * * ✅ FIXED: Type coercion for builtin types
+     * * @param ReflectionParameter[] $reflectionParams
      * @param array $parameters Route parameters or manual parameters
      * @return array
      */
@@ -328,13 +344,10 @@ trait Container
 
     /**
      * Cast value to specified builtin type
-     * 
-     * Safely converts string values (from route parameters) to expected types.
+     * * Safely converts string values (from route parameters) to expected types.
      * Handles common PHP builtin types with proper validation.
-     * 
-     * ✅ FIXED: Type name mapping (int vs integer, bool vs boolean)
-     * 
-     * @param mixed $value Value to cast
+     * * ✅ FIXED: Type name mapping (int vs integer, bool vs boolean)
+     * * @param mixed $value Value to cast
      * @param string $type Target type name
      * @return mixed Casted value
      */
@@ -367,8 +380,7 @@ trait Container
 
     /**
      * Cast to integer with validation
-     * 
-     * @throws \InvalidArgumentException If value cannot be converted to int
+     * * @throws \InvalidArgumentException If value cannot be converted to int
      */
     protected function castToInt(mixed $value): int
     {
@@ -388,8 +400,7 @@ trait Container
 
     /**
      * Cast to float with validation
-     * 
-     * @throws \InvalidArgumentException If value cannot be converted to float
+     * * @throws \InvalidArgumentException If value cannot be converted to float
      */
     protected function castToFloat(mixed $value): float
     {
@@ -407,8 +418,7 @@ trait Container
 
     /**
      * Cast to boolean
-     * 
-     * Handles common truthy/falsy representations:
+     * * Handles common truthy/falsy representations:
      * - "1", "true", "yes", "on" → true
      * - "0", "false", "no", "off" → false
      */

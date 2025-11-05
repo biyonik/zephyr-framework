@@ -34,6 +34,7 @@ return [
             'prefix' => env('DB_PREFIX', ''),
             'strict' => true,
             'engine' => null,
+            'persistent' => env('DB_PERSISTENT', true),
         ],
 
         'sqlite' => [

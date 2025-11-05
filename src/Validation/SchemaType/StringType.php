@@ -256,22 +256,39 @@ class StringType extends BaseType
      */
     public function validate(string $field, mixed $value, ValidationResult $result): void
     {
-        // Zorunlu alan kontrolü
+        // 1. Varsayılan değeri uygula
+        if ($value === null && $this->defaultValue !== null) {
+            $value = $this->defaultValue;
+        }
+
+        // 2. Zorunlu alan kontrolü (null VEYA boş string ise)
         if ($this->required && ($value === null || $value === '')) {
             $result->addError($field, ($this->label ?? $field) . " alanı zorunludur");
             return;
         }
 
-        // Null değerler için kontrolü atla
-        if ($value === null && $this->defaultValue !== null) {
-            $value = $this->defaultValue;
+        // 3. GÜVENLİK YAMASI: (report.md - Güvenlik Açığı #3)
+        // Nullable (boş geçilebilir) kontrolü
+        // Eğer değer null ise (ve zorunlu değilse, ki o kontrolü geçtik),
+        // ve ->nullable() metodu çağrılmışsa, doğrulamayı burada durdur.
+        if ($value === null && $this->nullable) {
+            return;
         }
 
-        // Tip kontrolü
+        // 4. Nullable değil ama hala null (zorunlu değil ve default yok)
+        // StringType, null değerleri (eğer nullable değilse) kabul etmez.
+        if ($value === null) {
+            $result->addError($field, ($this->label ?? $field) . " alanı metin tipinde olmalıdır (null olamaz)");
+            return;
+        }
+        
+        // 5. Tip kontrolü (Artık null değil, string olmalı)
         if (!is_string($value)) {
             $result->addError($field, ($this->label ?? $field) . " alanı metin tipinde olmalıdır");
             return;
         }
+
+        // --- Buradan sonra $value'nun 'string' olduğu garanti ---
 
         // Minimum uzunluk kontrolü
         if ($this->minLength !== null && strlen($value) < $this->minLength) {
@@ -300,7 +317,8 @@ class StringType extends BaseType
             ));
         }
 
-        if ($this->passwordRules && $value !== null && is_string($value)) {
+        // Şifre kuralları kontrolü (sadece string doluysa çalışır)
+        if ($this->passwordRules && $value !== '') {
             $this->validatePassword($value, $field, $result);
         }
     }

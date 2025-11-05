@@ -284,7 +284,14 @@ abstract class Model
      */
     public function syncOriginal(): self
     {
-        $this->original = $this->attributes;
+        $this->original = $this->attributes; //
+        
+        // YENİ: (Rapor #1 Çözümü)
+        // Modelin durumu "orijinal" haline döndüğünde,
+        // (örn: save() veya refresh() sonrası)
+        // hesaplanmış özellik önbelleğini temizle.
+        $this->clearAttributeCache();
+        
         return $this;
     }
 

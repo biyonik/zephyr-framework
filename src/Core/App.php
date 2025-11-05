@@ -10,7 +10,8 @@ use Zephyr\Http\{Request, Response};
 use Zephyr\Http\Kernel;
 use Zephyr\Support\{Config, Env};
 use Zephyr\Exceptions\Handler as ExceptionHandler;
-use Zephyr\Exceptions\Container\CircularDependencyException; // Yeni eklendi
+use Zephyr\Exceptions\Container\CircularDependencyException;
+use Zephyr\Exceptions\Container\BindingResolutionException; // YENİ EKLENDİ (Rapor #3 için)
 
 /**
  * Application Core Class
@@ -60,20 +61,16 @@ class App
      */
     protected ?Router $router = null; //
 
-    // --- YENİ EKLENEN ÖZELLİKLER (PERFORMANS ÖNBELLEĞİ) ---
-
     /**
      * Derlenmiş container önbelleği
      * @var array<string, \Closure>
      */
-    protected array $compiledMap = [];
+    protected array $compiledMap = []; //
 
     /**
      * Önbelleğin yüklenip yüklenmediği
      */
-    protected bool $isCompiled = false;
-
-    // --- YENİ EKLENEN ÖZELLİKLER SONU ---
+    protected bool $isCompiled = false; //
 
 
     /**
@@ -85,8 +82,8 @@ class App
         $this->registerBaseBindings(); //
         $this->registerBasePaths(); //
 
-        // *** YENİ: Önbelleği en başta yükle ***
-        $this->loadCompiledContainer();
+        // Önbelleği en başta yükle
+        $this->loadCompiledContainer(); //
     }
 
     /**
@@ -105,17 +102,15 @@ class App
     }
 
     /**
-     * *** YENİ: Derlenmiş container önbelleğini yükle ***
+     * Derlenmiş container önbelleğini yükle
      */
     protected function loadCompiledContainer(): void
     {
-        // base_path() helper'ı burada henüz
-        // yüklenmemiş olabilir, $this->basePath'i kullanalım.
-        $cacheFile = $this->basePath . '/storage/framework/cache/container.php';
-
+        $cacheFile = $this->basePath . '/storage/framework/cache/container.php'; //
+        
         if (file_exists($cacheFile)) {
-            $this->compiledMap = require $cacheFile;
-            $this->isCompiled = true;
+            $this->compiledMap = require $cacheFile; //
+            $this->isCompiled = true; //
         }
     }
 
@@ -227,13 +222,15 @@ class App
     }
 
     /**
-     * *** YENİ: Container trait'indeki resolve() metodunu override ediyoruz ***
+     * *** GÜNCELLENDİ (Rapor #3: Container Type Safety) ***
      *
      * Resolve a service from the container.
      * Bu metot, performansı artırmak için derlenmiş önbelleği kontrol eder.
-     * * @param string $abstract Class or interface name to resolve
+     *
+     * @param string $abstract Class or interface name to resolve
      * @return mixed Resolved instance
-     * * @throws BindingResolutionException If resolution fails
+     *
+     * @throws BindingResolutionException If resolution fails
      * @throws CircularDependencyException If circular dependency detected
      */
     public function resolve(string $abstract): mixed
@@ -250,15 +247,24 @@ class App
             return $this->instances[$abstract]; //
         }
 
-        // *** YENİ: ÖNBELLEK KONTROLÜ ***
-        // Eğer derlenmiş haritada bu abstract varsa, Reflection'ı
-        // tamamen atla ve optimize edilmiş Closure'ı çalıştır.
+        // *** ÖNBELLEK KONTROLÜ (GÜNCELLENDİ) ***
         if ($this->isCompiled && isset($this->compiledMap[$abstract])) {
-
+            
             $this->resolving[] = $abstract;
-
+            
             try {
                 $instance = $this->compiledMap[$abstract]($this);
+
+                // --- YAMA (Rapor #3 Çözümü) ---
+                // Önbellekten gelen nesnenin tipini doğrula.
+                // Bu, bozuk bir önbellek dosyasının runtime'da
+                // TypeError fırlatmasını engeller.
+                if (!$instance instanceof $abstract) {
+                    throw new BindingResolutionException(
+                        "Compiled container cache returned invalid type for [{$abstract}]"
+                    ); //
+                }
+                // --- YAMA SONU ---
 
                 if ($this->isShared($abstract)) { //
                     $this->instances[$abstract] = $instance;
@@ -266,21 +272,21 @@ class App
             } finally {
                 array_pop($this->resolving);
             }
-
+            
             return $instance;
         }
         // *** ÖNBELLEK KONTROLÜ SONU ***
 
-
+        
         // Önbellekte bulunamazsa, 'Container' trait'indeki
         // orijinal (Reflection tabanlı) mantığı çalıştır.
-
+        
         $this->resolving[] = $abstract; //
 
         try {
             // Get concrete implementation
             $concrete = $this->getConcrete($abstract); //
-
+            
             // Build instance
             $instance = $this->build($concrete); //
 
@@ -290,8 +296,9 @@ class App
             }
 
             return $instance; //
-
+            
         } finally {
+            // ✅ FIX: Always clean up stack, even if exception thrown
             array_pop($this->resolving); //
         }
     }

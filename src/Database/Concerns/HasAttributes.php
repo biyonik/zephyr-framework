@@ -16,12 +16,22 @@ use DateTimeInterface;
  * - JSON attribute handling
  * - Date attribute handling
  *
+ * (GÜNCELLENDİ - Rapor #1: N+1 Query Problem)
+ *
  * @author  Ahmet ALTUN
  * @email   ahmet.altun60@gmail.com
  * @github  https://github.com/biyonik
  */
 trait HasAttributes
 {
+    /**
+     * YENİ: Hesaplanmış özellikler için önbellek.
+     * (Rapor #1: N+1 Query Problem)
+     *
+     * @var array<string, mixed>
+     */
+    protected array $attributeCache = [];
+
     /**
      * Get an attribute value
      *
@@ -30,24 +40,39 @@ trait HasAttributes
      */
     public function getAttribute(string $key): mixed
     {
+        // *** YENİ: ÖNBELLEK KONTROLÜ ***
+        // (Rapor #1 Çözümü)
+        if (array_key_exists($key, $this->attributeCache)) {
+            return $this->attributeCache[$key];
+        }
+        // *** YENİ KONTROL SONU ***
+
+
         // 1. Check if attribute exists
-        if (!array_key_exists($key, $this->attributes)) {
+        if (!array_key_exists($key, $this->attributes)) { //
+            // Önbelleğe null yazıp dön (tekrar tekrar aranmasın)
+            $this->attributeCache[$key] = null;
             return null;
         }
 
         $value = $this->attributes[$key];
 
         // 2. Check for accessor method (getUserNameAttribute)
-        if ($this->hasGetMutator($key)) {
-            return $this->mutateAttribute($key, $value);
+        if ($this->hasGetMutator($key)) { //
+            $mutatedValue = $this->mutateAttribute($key, $value);
+            $this->attributeCache[$key] = $mutatedValue; // YENİ: Önbelleğe al
+            return $mutatedValue;
         }
 
         // 3. Cast attribute value
-        if ($this->hasCast($key)) {
-            return $this->castAttribute($key, $value);
+        if ($this->hasCast($key)) { //
+            $castValue = $this->castAttribute($key, $value);
+            $this->attributeCache[$key] = $castValue; // YENİ: Önbelleğe al
+            return $castValue;
         }
 
         // 4. Return raw value
+        $this->attributeCache[$key] = $value; // YENİ: Ham değeri de önbelleğe al
         return $value;
     }
 
@@ -60,18 +85,23 @@ trait HasAttributes
      */
     public function setAttribute(string $key, mixed $value): self
     {
+        // *** YENİ: ÖNBELLEK TEMİZLİĞİ ***
+        // (Rapor #1 Çözümü)
+        unset($this->attributeCache[$key]);
+        // *** YENİ TEMİZLİK SONU ***
+
         // 1. Check for mutator method (setUserNameAttribute)
-        if ($this->hasSetMutator($key)) {
+        if ($this->hasSetMutator($key)) { //
             return $this->setMutatedAttributeValue($key, $value);
         }
 
         // 2. Cast value before setting
-        if ($this->hasCast($key)) {
+        if ($this->hasCast($key)) { //
             $value = $this->castAttributeForStorage($key, $value);
         }
 
         // 3. Set attribute
-        $this->attributes[$key] = $value;
+        $this->attributes[$key] = $value; //
 
         return $this;
     }
@@ -284,11 +314,16 @@ trait HasAttributes
      */
     public function setRawAttributes(array $attributes, bool $sync = false): self
     {
-        $this->attributes = $attributes;
+        $this->attributes = $attributes; //
 
         if ($sync) {
-            $this->syncOriginal();
+            $this->syncOriginal(); //
         }
+        
+        // *** YENİ: TÜM ÖNBELLEĞİ TEMİZLE ***
+        // (Rapor #1 Çözümü)
+        $this->clearAttributeCache();
+        // *** YENİ TEMİZLİK SONU ***
 
         return $this;
     }
@@ -320,7 +355,10 @@ trait HasAttributes
     {
         $attributes = [];
 
-        foreach ($this->attributes as $key => $value) {
+        // YENİ: $this->attributes yerine array_keys($this->attributes)
+        // kullanarak sadece tanımlı anahtarları çağıralım.
+        // getAttribute() zaten önbellekten hızlıca dönecek.
+        foreach (array_keys($this->attributes) as $key) {
             $attributes[$key] = $this->getAttribute($key);
         }
 
@@ -335,5 +373,15 @@ trait HasAttributes
         $value = str_replace(['-', '_'], ' ', $value);
         $value = ucwords($value);
         return str_replace(' ', '', $value);
+    }
+    
+    /**
+     * YENİ: Hesaplanmış özellik önbelleğini temizler.
+     * (Rapor #1 Çözümü)
+     */
+    public function clearAttributeCache(): self
+    {
+        $this->attributeCache = [];
+        return $this;
     }
 }

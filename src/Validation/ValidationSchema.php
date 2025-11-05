@@ -244,20 +244,34 @@ class ValidationSchema implements ValidationSchemaInterface
 
     /**
      * Nesne klonlama desteği.
+     * (GÜNCELLENDİ - Rapor #2: Deep Clone Problemi)
      *
      * @return void
      */
     public function __clone()
     {
-        // Derin kopyalama için schema'yı klonla
+        // 1. 'schema' dizisindeki BaseType nesnelerini derin kopyala (Bu zaten doğruydu)
         $clonedSchema = array_map(function ($rule) {
-            return clone $rule;
+            return clone $rule; //
         }, $this->schema);
         $this->schema = $clonedSchema;
 
-        // Koşullu kuralları ve çapraz doğrulamaları da kopyala
-        $this->conditionalRules = $this->conditionalRules;
-        $this->crossValidators = $this->crossValidators;
+        // 2. 'conditionalRules' dizisini derin kopyala (Rapor #2 Çözümü)
+        // Klon ve orijinalin aynı diziyi paylaşmasını engellemek için
+        // array_map ile diziyi yeniden oluşturuyoruz.
+        $this->conditionalRules = array_map(function ($rule) {
+            // İçerideki diziyi de yeniden oluşturarak bağımsız olmasını garantile
+            return [
+                'field' => $rule['field'],
+                'expectedValue' => $rule['expectedValue'],
+                'callback' => $rule['callback'] // Closure'lar referans olarak kalır, bu normaldir
+            ];
+        }, $this->conditionalRules); //
+
+        // 3. 'crossValidators' dizisini derin kopyala (Rapor #2 Çözümü)
+        $this->crossValidators = array_map(function ($validator) {
+            return $validator; // Closure'lar referans olarak kalır, bu normaldir
+        }, $this->crossValidators); //
     }
 
     /**

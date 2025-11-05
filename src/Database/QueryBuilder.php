@@ -306,9 +306,19 @@ class QueryBuilder
      */
     public function orderBy(string $column, string $direction = 'ASC'): self
     {
+        if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)?$/', $column)) {
+            throw new \InvalidArgumentException("Invalid column name for ORDER BY: {$column}");
+        }
+
+        $direction = strtoupper($direction);
+
+        if (!in_array($direction, ['ASC', 'DESC'], true)) {
+            throw new \InvalidArgumentException("Invalid direction for ORDER BY: {$direction}");
+        }
+
         $this->orders[] = [
             'column' => $column,
-            'direction' => strtoupper($direction),
+            'direction' => $direction,
         ];
 
         return $this;
