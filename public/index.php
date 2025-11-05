@@ -76,7 +76,19 @@ try {
     |--------------------------------------------------------------------------
     */
 
-    require __DIR__ . '/../routes/api.php';
+    $router = $app->router(); //
+    $cacheFile = $app->basePath('storage/framework/cache/routes.php');
+
+    if (file_exists($cacheFile)) {
+        // 1. Hızlı: Önbelleğe alınmış (Controller) rotalarını yükle
+        $cachedRoutes = unserialize(file_get_contents($cacheFile));
+        $router->setCachedRoutes($cachedRoutes);
+    }
+
+    // 2. Yavaş: Önbelleğe alınamayan (Closure) rotalarını yükle
+    // Not: Router'daki çift kayıt engelleme sayesinde,
+    // önbellekten gelen rotalar burada tekrar eklenmeyecek.
+    $router->loadRoutesFile($app->basePath('routes/api.php'));
 
     /*
     |--------------------------------------------------------------------------

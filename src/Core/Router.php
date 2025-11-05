@@ -10,11 +10,9 @@ use Zephyr\Exceptions\Http\{NotFoundException, MethodNotAllowedException};
 
 /**
  * HTTP Router
- * 
- * Handles route registration, pattern matching, and request dispatching.
+ * * Handles route registration, pattern matching, and request dispatching.
  * Supports dynamic parameters, middleware, and route groups.
- * 
- * @author  Ahmet ALTUN
+ * * @author  Ahmet ALTUN
  * @email   ahmet.altun60@gmail.com
  * @github  https://github.com/biyonik
  */
@@ -22,8 +20,7 @@ class Router
 {
     /**
      * Registered routes grouped by method
-     * 
-     * @var array<string, array<Route>>
+     * * @var array<string, array<Route>>
      */
     protected array $routes = [
         'GET' => [],
@@ -42,10 +39,16 @@ class Router
 
     /**
      * Route name mappings
-     * 
-     * @var array<string, Route>
+     * * @var array<string, Route>
      */
     protected array $namedRoutes = [];
+
+    /**
+     * YENİ: Hangi rotaların zaten eklendiğini
+     * hızlıca kontrol etmek için bir arama tablosu (lookup table).
+     * @var array<string, bool>
+     */
+    protected array $routeLookup = [];
 
     /**
      * Register a GET route
@@ -125,28 +128,40 @@ class Router
 
     /**
      * Add a route to the collection
+     * *** GÜNCELLENDİ (optimize:route optimizasyonu için) ***
      */
     protected function addRoute(array $methods, string $uri, Closure|array|string $action): Route
     {
         // Apply group prefix if exists
-        $uri = $this->applyGroupPrefix($uri);
+        $uri = $this->applyGroupPrefix($uri); //
 
         // Create route instance
-        $route = new Route($methods, $uri, $action);
+        $route = new Route($methods, $uri, $action); //
 
         // Apply group middleware
-        if ($middleware = $this->getGroupMiddleware()) {
-            $route->middleware($middleware);
+        if ($middleware = $this->getGroupMiddleware()) { //
+            $route->middleware($middleware); //
         }
 
         // Apply group namespace
-        if ($namespace = $this->getGroupNamespace()) {
-            $route->namespace($namespace);
+        if ($namespace = $this->getGroupNamespace()) { //
+            $route->namespace($namespace); //
         }
 
         // Register route for each method
         foreach ($methods as $method) {
+
+            // *** YENİ: Çift kaydı engelleme kontrolü ***
+            $lookupKey = $method . $uri;
+            if (isset($this->routeLookup[$lookupKey])) {
+                // Bu rota (muhtemelen önbellekten) zaten eklendi.
+                // Closure olan versiyonu (api.php'den gelen) atlansın.
+                continue;
+            }
+            // *** YENİ KONTROL SONU ***
+
             $this->routes[$method][] = $route;
+            $this->routeLookup[$lookupKey] = true; // Rotayı eklendi olarak işaretle
         }
 
         return $route;
@@ -157,13 +172,13 @@ class Router
      */
     protected function applyGroupPrefix(string $uri): string
     {
-        $prefix = $this->getGroupAttribute('prefix');
+        $prefix = $this->getGroupAttribute('prefix'); //
 
-        if ($prefix) {
-            $uri = rtrim($prefix, '/') . '/' . ltrim($uri, '/');
+        if ($prefix) { //
+            $uri = rtrim($prefix, '/') . '/' . ltrim($uri, '/'); //
         }
 
-        return $uri;
+        return $uri; //
     }
 
     /**
@@ -171,7 +186,7 @@ class Router
      */
     protected function getGroupMiddleware(): array
     {
-        return $this->getGroupAttribute('middleware', []);
+        return $this->getGroupAttribute('middleware', []); //
     }
 
     /**
@@ -179,7 +194,7 @@ class Router
      */
     protected function getGroupNamespace(): ?string
     {
-        return $this->getGroupAttribute('namespace');
+        return $this->getGroupAttribute('namespace'); //
     }
 
     /**
@@ -187,57 +202,87 @@ class Router
      */
     protected function getGroupAttribute(string $key, mixed $default = null): mixed
     {
-        if (empty($this->groupStack)) {
-            return $default;
+        if (empty($this->groupStack)) { //
+            return $default; //
         }
 
-        $groups = array_reverse($this->groupStack);
+        $groups = array_reverse($this->groupStack); //
 
-        foreach ($groups as $group) {
-            if (isset($group[$key])) {
-                return $group[$key];
+        foreach ($groups as $group) { //
+            if (isset($group[$key])) { //
+                return $group[$key]; //
             }
         }
 
-        return $default;
+        return $default; //
+    }
+
+    /**
+     * YENİ: Önbelleğe alınmış rotaları doğrudan ayarlar.
+     * Bu metot, public/index.php tarafından çağrılacak.
+     */
+    public function setCachedRoutes(array $routes): void
+    {
+        $this->routes = $routes;
+
+        // Arama tablosunu (lookup table) yeniden oluştur
+        $this->routeLookup = [];
+        foreach ($this->routes as $method => $methodRoutes) {
+            foreach ($methodRoutes as $route) {
+                // Not: Bir rotanın birden fazla metodu olabilir (örn. GET ve HEAD)
+                foreach ($route->getMethods() as $routeMethod) { //
+                    $this->routeLookup[$routeMethod . $route->getUri()] = true; //
+                }
+            }
+        }
+    }
+
+    /**
+     * YENİ: Verilen bir rota dosyasını yükler.
+     * Bu metot, OptimizeRouteCommand ve public/index.php tarafından kullanılır.
+     */
+    public function loadRoutesFile(string $filePath): void
+    {
+        // Rota dosyasının $router değişkenine erişebilmesini sağla
+        $router = $this;
+        require $filePath;
     }
 
     /**
      * Dispatch request to matching route
-     * 
-     * @throws NotFoundException
+     * * @throws NotFoundException
      * @throws MethodNotAllowedException
      */
     public function dispatch(Request $request): Response
     {
-        $method = $request->method();
-        $uri = $request->uri();
+        $method = $request->method(); //
+        $uri = $request->uri(); //
 
         // Find matching route
-        $route = $this->findRoute($method, $uri);
+        $route = $this->findRoute($method, $uri); //
 
-        if (!$route) {
+        if (!$route) { //
             // Check if route exists for other methods
-            if ($this->hasRouteForOtherMethods($uri, $method)) {
-                throw new MethodNotAllowedException(
+            if ($this->hasRouteForOtherMethods($uri, $method)) { //
+                throw new MethodNotAllowedException( //
                     "Method {$method} not allowed for {$uri}"
                 );
             }
 
-            throw new NotFoundException("Route not found: {$uri}");
+            throw new NotFoundException("Route not found: {$uri}"); //
         }
 
         // Extract and set route parameters
-        $parameters = $route->extractParameters($uri);
-        $request->setRouteParams($parameters);
+        $parameters = $route->extractParameters($uri); //
+        $request->setRouteParams($parameters); //
 
         // Execute route action
-        $response = $route->execute($request, $parameters);
+        $response = $route->execute($request, $parameters); //
 
         // ✅ Associate request with response (for HEAD detection, etc.)
-        $response->setRequest($request);
+        $response->setRequest($request); //
 
-        return $response;
+        return $response; //
     }
 
     /**
@@ -245,15 +290,15 @@ class Router
      */
     protected function findRoute(string $method, string $uri): ?Route
     {
-        $routes = $this->routes[$method] ?? [];
+        $routes = $this->routes[$method] ?? []; //
 
-        foreach ($routes as $route) {
-            if ($route->matches($uri)) {
-                return $route;
+        foreach ($routes as $route) { //
+            if ($route->matches($uri)) { //
+                return $route; //
             }
         }
 
-        return null;
+        return null; //
     }
 
     /**
@@ -261,19 +306,19 @@ class Router
      */
     protected function hasRouteForOtherMethods(string $uri, string $excludeMethod): bool
     {
-        foreach ($this->routes as $method => $routes) {
-            if ($method === $excludeMethod) {
-                continue;
+        foreach ($this->routes as $method => $routes) { //
+            if ($method === $excludeMethod) { //
+                continue; //
             }
 
-            foreach ($routes as $route) {
-                if ($route->matches($uri)) {
-                    return true;
+            foreach ($routes as $route) { //
+                if ($route->matches($uri)) { //
+                    return true; //
                 }
             }
         }
 
-        return false;
+        return false; //
     }
 
     /**
@@ -281,7 +326,7 @@ class Router
      */
     public function getRoutes(): array
     {
-        return $this->routes;
+        return $this->routes; //
     }
 
     /**
@@ -289,7 +334,7 @@ class Router
      */
     public function getByName(string $name): ?Route
     {
-        return $this->namedRoutes[$name] ?? null;
+        return $this->namedRoutes[$name] ?? null; //
     }
 
     /**
@@ -297,7 +342,7 @@ class Router
      */
     public function name(string $name, Route $route): void
     {
-        $this->namedRoutes[$name] = $route;
+        $this->namedRoutes[$name] = $route; //
     }
 
     /**
@@ -305,12 +350,12 @@ class Router
      */
     public function url(string $name, array $parameters = []): string
     {
-        $route = $this->getByName($name);
+        $route = $this->getByName($name); //
 
-        if (!$route) {
-            throw new \InvalidArgumentException("Route [{$name}] not defined.");
+        if (!$route) { //
+            throw new \InvalidArgumentException("Route [{$name}] not defined."); //
         }
 
-        return $route->url($parameters);
+        return $route->url($parameters); //
     }
 }

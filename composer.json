@@ -14,10 +14,11 @@
     "prefer-stable": true,
     "require": {
         "php": "^8.1",
-        "vlucas/phpdotenv": "^5.6",
+        "ext-fileinfo": "*",
+        "ext-pdo": "*",
         "firebase/php-jwt": "^6.10",
-      "ext-fileinfo": "*",
-      "ext-pdo": "*"
+        "symfony/console": "^6.4",
+        "vlucas/phpdotenv": "^5.6"
     },
     "require-dev": {
         "roave/security-advisories": "dev-latest"

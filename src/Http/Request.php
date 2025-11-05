@@ -6,6 +6,9 @@ namespace Zephyr\Http;
 
 use Zephyr\Support\Config;
 use Zephyr\Support\IpAddress;
+use Zephyr\Validation\ValidationSchema;
+use Zephyr\Exceptions\Http\ValidationException;
+use Zephyr\Exceptions\Http\BadRequestException;
 
 /**
  * HTTP Request Handler
@@ -188,7 +191,7 @@ class Request
             if ($jsonError !== JSON_ERROR_NONE) {
                 $errorMessage = static::getJsonErrorMessage($jsonError);
 
-                throw new \Zephyr\Exceptions\Http\BadRequestException(
+                throw new BadRequestException(
                     "Invalid JSON in request body: {$errorMessage}"
                 );
             }
@@ -663,5 +666,30 @@ class Request
         }
 
         return $this->rawBody;
+    }
+
+    /**
+     * Gelen isteği, verilen şemaya göre doğrular.
+     * * Başarılı olursa, sadece doğrulanmış veriyi döndürür.
+     * Başarısız olursa, otomatik olarak ValidationException fırlatır.
+     *
+     * @param ValidationSchema $schema Oluşturulan doğrulama şeması
+     * @return array Doğrulanmış ve güvenli veri
+     * @throws ValidationException
+     */
+    public function validate(ValidationSchema $schema): array
+    {
+        // Gelen tüm veriyi (GET + POST/JSON) doğrula
+        $data = $this->all();
+
+        $result = $schema->validate($data); 
+
+        if ($result->hasErrors()) { //
+            throw new ValidationException(
+                errors: $result->getErrors(), 
+                message: 'Doğrulama hatası'
+            ); 
+        }
+        return $result->getValidData(); 
     }
 }

@@ -10,66 +10,83 @@ use Zephyr\Http\{Request, Response};
 use Zephyr\Http\Kernel;
 use Zephyr\Support\{Config, Env};
 use Zephyr\Exceptions\Handler as ExceptionHandler;
+use Zephyr\Exceptions\Container\CircularDependencyException; // Yeni eklendi
 
 /**
  * Application Core Class
- * 
- * The heart of the Zephyr Framework. Manages the application lifecycle,
+ * * The heart of the Zephyr Framework. Manages the application lifecycle,
  * service container, configuration, and request handling.
- * 
- * @author  Ahmet ALTUN
+ * * @author  Ahmet ALTUN
  * @email   ahmet.altun60@gmail.com
  * @github  https://github.com/biyonik
  */
 class App
 {
-    use Container;
+    use Container; //
 
     /**
      * Framework version
      */
-    public const VERSION = '1.0.0';
+    public const VERSION = '1.0.0'; //
 
     /**
      * The singleton instance
      */
-    protected static ?self $instance = null;
+    protected static ?self $instance = null; //
 
     /**
      * Base path of the application
      */
-    protected string $basePath;
+    protected string $basePath; //
 
     /**
      * Loaded service providers
-     * 
-     * @var array<class-string, object>
+     * * @var array<class-string, object>
      */
-    protected array $providers = [];
+    protected array $providers = []; //
 
     /**
      * Application has been bootstrapped
      */
-    protected bool $booted = false;
+    protected bool $booted = false; //
 
     /**
      * HTTP Kernel instance
      */
-    protected ?Kernel $kernel = null;
+    protected ?Kernel $kernel = null; //
 
     /**
      * Router instance
      */
-    protected ?Router $router = null;
+    protected ?Router $router = null; //
+
+    // --- YENİ EKLENEN ÖZELLİKLER (PERFORMANS ÖNBELLEĞİ) ---
+
+    /**
+     * Derlenmiş container önbelleği
+     * @var array<string, \Closure>
+     */
+    protected array $compiledMap = [];
+
+    /**
+     * Önbelleğin yüklenip yüklenmediği
+     */
+    protected bool $isCompiled = false;
+
+    // --- YENİ EKLENEN ÖZELLİKLER SONU ---
+
 
     /**
      * Private constructor for singleton pattern
      */
     private function __construct(string $basePath)
     {
-        $this->basePath = rtrim($basePath, '/');
-        $this->registerBaseBindings();
-        $this->registerBasePaths();
+        $this->basePath = rtrim($basePath, '/'); //
+        $this->registerBaseBindings(); //
+        $this->registerBasePaths(); //
+
+        // *** YENİ: Önbelleği en başta yükle ***
+        $this->loadCompiledContainer();
     }
 
     /**
@@ -77,14 +94,29 @@ class App
      */
     public static function getInstance(string $basePath = ''): self
     {
-        if (is_null(self::$instance)) {
-            if (empty($basePath)) {
-                throw new \RuntimeException('Base path must be provided for initial application creation');
+        if (is_null(self::$instance)) { //
+            if (empty($basePath)) { //
+                throw new \RuntimeException('Base path must be provided for initial application creation'); //
             }
-            self::$instance = new self($basePath);
+            self::$instance = new self($basePath); //
         }
 
-        return self::$instance;
+        return self::$instance; //
+    }
+
+    /**
+     * *** YENİ: Derlenmiş container önbelleğini yükle ***
+     */
+    protected function loadCompiledContainer(): void
+    {
+        // base_path() helper'ı burada henüz
+        // yüklenmemiş olabilir, $this->basePath'i kullanalım.
+        $cacheFile = $this->basePath . '/storage/framework/cache/container.php';
+
+        if (file_exists($cacheFile)) {
+            $this->compiledMap = require $cacheFile;
+            $this->isCompiled = true;
+        }
     }
 
     /**
@@ -93,11 +125,11 @@ class App
     protected function registerBaseBindings(): void
     {
         // Register app instance
-        $this->instance('app', $this);
-        $this->instance(self::class, $this);
+        $this->instance('app', $this); //
+        $this->instance(self::class, $this); //
 
         // Register exception handler
-        $this->singleton(ExceptionHandler::class);
+        $this->singleton(ExceptionHandler::class); //
     }
 
     /**
@@ -105,11 +137,11 @@ class App
      */
     protected function registerBasePaths(): void
     {
-        $this->instance('path.base', $this->basePath);
-        $this->instance('path.config', $this->basePath . '/config');
-        $this->instance('path.storage', $this->basePath . '/storage');
-        $this->instance('path.public', $this->basePath . '/public');
-        $this->instance('path.routes', $this->basePath . '/routes');
+        $this->instance('path.base', $this->basePath); //
+        $this->instance('path.config', $this->basePath . '/config'); //
+        $this->instance('path.storage', $this->basePath . '/storage'); //
+        $this->instance('path.public', $this->basePath . '/public'); //
+        $this->instance('path.routes', $this->basePath . '/routes'); //
     }
 
     /**
@@ -117,9 +149,9 @@ class App
      */
     public function loadEnvironment(): void
     {
-        if (file_exists($this->basePath . '/.env')) {
-            $dotenv = Dotenv::createImmutable($this->basePath);
-            $dotenv->safeLoad();
+        if (file_exists($this->basePath . '/.env')) { //
+            $dotenv = Dotenv::createImmutable($this->basePath); //
+            $dotenv->safeLoad(); //
         }
     }
 
@@ -128,18 +160,18 @@ class App
      */
     public function loadConfiguration(): void
     {
-        Config::load($this->basePath . '/config');
+        Config::load($this->basePath . '/config'); //
 
         // Set default timezone
-        date_default_timezone_set(Config::get('app.timezone', 'UTC'));
+        date_default_timezone_set(Config::get('app.timezone', 'UTC')); //
 
         // Set error reporting based on debug mode
-        if (Config::get('app.debug', false)) {
-            error_reporting(E_ALL);
-            ini_set('display_errors', '1');
+        if (Config::get('app.debug', false)) { //
+            error_reporting(E_ALL); //
+            ini_set('display_errors', '1'); //
         } else {
-            error_reporting(0);
-            ini_set('display_errors', '0');
+            error_reporting(0); //
+            ini_set('display_errors', '0'); //
         }
     }
 
@@ -148,13 +180,13 @@ class App
      */
     public function registerProviders(): void
     {
-        $providers = Config::get('app.providers', []);
+        $providers = Config::get('app.providers', []); //
 
-        foreach ($providers as $provider) {
-            $this->register($provider);
+        foreach ($providers as $provider) { //
+            $this->register($provider); //
         }
 
-        $this->boot();
+        $this->boot(); //
     }
 
     /**
@@ -162,17 +194,17 @@ class App
      */
     public function register(string $provider): void
     {
-        if (isset($this->providers[$provider])) {
-            return;
+        if (isset($this->providers[$provider])) { //
+            return; //
         }
 
-        $instance = new $provider($this);
+        $instance = new $provider($this); //
 
-        if (method_exists($instance, 'register')) {
-            $instance->register();
+        if (method_exists($instance, 'register')) { //
+            $instance->register(); //
         }
 
-        $this->providers[$provider] = $instance;
+        $this->providers[$provider] = $instance; //
     }
 
     /**
@@ -180,18 +212,88 @@ class App
      */
     protected function boot(): void
     {
-        if ($this->booted) {
-            return;
+        if ($this->booted) { //
+            return; //
         }
 
         // Boot service providers
-        foreach ($this->providers as $provider) {
-            if (method_exists($provider, 'boot')) {
-                $provider->boot();
+        foreach ($this->providers as $provider) { //
+            if (method_exists($provider, 'boot')) { //
+                $provider->boot(); //
             }
         }
 
-        $this->booted = true;
+        $this->booted = true; //
+    }
+
+    /**
+     * *** YENİ: Container trait'indeki resolve() metodunu override ediyoruz ***
+     *
+     * Resolve a service from the container.
+     * Bu metot, performansı artırmak için derlenmiş önbelleği kontrol eder.
+     * * @param string $abstract Class or interface name to resolve
+     * @return mixed Resolved instance
+     * * @throws BindingResolutionException If resolution fails
+     * @throws CircularDependencyException If circular dependency detected
+     */
+    public function resolve(string $abstract): mixed
+    {
+        // Check for circular dependencies
+        if (in_array($abstract, $this->resolving, true)) { //
+            throw new CircularDependencyException( //
+                "Circular dependency detected: " . implode(' -> ', $this->resolving) . ' -> ' . $abstract
+            );
+        }
+
+        // Return singleton if already resolved
+        if (isset($this->instances[$abstract])) { //
+            return $this->instances[$abstract]; //
+        }
+
+        // *** YENİ: ÖNBELLEK KONTROLÜ ***
+        // Eğer derlenmiş haritada bu abstract varsa, Reflection'ı
+        // tamamen atla ve optimize edilmiş Closure'ı çalıştır.
+        if ($this->isCompiled && isset($this->compiledMap[$abstract])) {
+
+            $this->resolving[] = $abstract;
+
+            try {
+                $instance = $this->compiledMap[$abstract]($this);
+
+                if ($this->isShared($abstract)) { //
+                    $this->instances[$abstract] = $instance;
+                }
+            } finally {
+                array_pop($this->resolving);
+            }
+
+            return $instance;
+        }
+        // *** ÖNBELLEK KONTROLÜ SONU ***
+
+
+        // Önbellekte bulunamazsa, 'Container' trait'indeki
+        // orijinal (Reflection tabanlı) mantığı çalıştır.
+
+        $this->resolving[] = $abstract; //
+
+        try {
+            // Get concrete implementation
+            $concrete = $this->getConcrete($abstract); //
+
+            // Build instance
+            $instance = $this->build($concrete); //
+
+            // Store as singleton if marked as shared
+            if ($this->isShared($abstract)) { //
+                $this->instances[$abstract] = $instance; //
+            }
+
+            return $instance; //
+
+        } finally {
+            array_pop($this->resolving); //
+        }
     }
 
     /**
@@ -201,15 +303,15 @@ class App
     {
         try {
             // ✅ Ensure request is in container (defensive)
-            if (!$this->has(Request::class)) {
-                $this->instance(Request::class, $request);
+            if (!$this->has(Request::class)) { //
+                $this->instance(Request::class, $request); //
             }
 
-            $kernel = $this->getKernel();
-            return $kernel->handle($request);
+            $kernel = $this->getKernel(); //
+            return $kernel->handle($request); //
         } catch (\Throwable $e) {
-            $handler = $this->resolve(ExceptionHandler::class);
-            return $handler->handle($e, $request);
+            $handler = $this->resolve(ExceptionHandler::class); //
+            return $handler->handle($e, $request); //
         }
     }
 
@@ -218,14 +320,14 @@ class App
      */
     public function terminate(Request $request, Response $response): void
     {
-        if ($this->kernel) {
-            $this->kernel->terminate($request, $response);
+        if ($this->kernel) { //
+            $this->kernel->terminate($request, $response); //
         }
 
         // Run terminable service providers
-        foreach ($this->providers as $provider) {
-            if (method_exists($provider, 'terminate')) {
-                $provider->terminate();
+        foreach ($this->providers as $provider) { //
+            if (method_exists($provider, 'terminate')) { //
+                $provider->terminate(); //
             }
         }
     }
@@ -235,11 +337,11 @@ class App
      */
     protected function getKernel(): Kernel
     {
-        if (is_null($this->kernel)) {
-            $this->kernel = $this->resolve(Kernel::class);
+        if (is_null($this->kernel)) { //
+            $this->kernel = $this->resolve(Kernel::class); //
         }
 
-        return $this->kernel;
+        return $this->kernel; //
     }
 
     /**
@@ -247,12 +349,12 @@ class App
      */
     public function router(): Router
     {
-        if (is_null($this->router)) {
-            $this->router = $this->resolve(Router::class);
-            $this->singleton(Router::class, fn() => $this->router);
+        if (is_null($this->router)) { //
+            $this->router = $this->resolve(Router::class); //
+            $this->singleton(Router::class, fn() => $this->router); //
         }
 
-        return $this->router;
+        return $this->router; //
     }
 
     /**
@@ -260,7 +362,7 @@ class App
      */
     public function basePath(string $path = ''): string
     {
-        return $this->basePath . ($path ? '/' . ltrim($path, '/') : '');
+        return $this->basePath . ($path ? '/' . ltrim($path, '/') : ''); //
     }
 
     /**
@@ -268,7 +370,7 @@ class App
      */
     public function isDebug(): bool
     {
-        return (bool) Config::get('app.debug', false);
+        return (bool) Config::get('app.debug', false); //
     }
 
     /**
@@ -276,7 +378,7 @@ class App
      */
     public function isProduction(): bool
     {
-        return Config::get('app.env') === 'production';
+        return Config::get('app.env') === 'production'; //
     }
 
     /**
@@ -284,7 +386,7 @@ class App
      */
     public function environment(): string
     {
-        return Config::get('app.env', 'production');
+        return Config::get('app.env', 'production'); //
     }
 
     /**
@@ -292,19 +394,19 @@ class App
      */
     public function version(): string
     {
-        return self::VERSION;
+        return self::VERSION; //
     }
 
     /**
      * Prevent cloning (singleton pattern)
      */
-    private function __clone() {}
+    private function __clone() {} //
 
     /**
      * Prevent unserialization (singleton pattern)
      */
     public function __wakeup()
     {
-        throw new \RuntimeException('Cannot unserialize singleton');
+        throw new \RuntimeException('Cannot unserialize singleton'); //
     }
 }

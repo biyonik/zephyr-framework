@@ -1,0 +1,75 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * Zephyr Framework - CLI Giriş Noktası
+ */
+
+use Zephyr\Core\App;
+use Symfony\Component\Console\Application;
+
+/*
+|--------------------------------------------------------------------------
+| Autoloader'ı Yükle
+|--------------------------------------------------------------------------
+*/
+
+$autoloader = __DIR__ . '/vendor/autoload.php';
+
+if (!file_exists($autoloader)) {
+    die('Lütfen "composer install" komutunu çalıştırarak bağımlılıkları yükleyin.' . PHP_EOL);
+}
+
+require $autoloader;
+
+/*
+|--------------------------------------------------------------------------
+| Uygulamayı Bootstrap Et (CLI Modu)
+|--------------------------------------------------------------------------
+|
+| HTTP Kernel ve Request/Response döngüsü hariç,
+| uygulamanın çekirdeğini (Container, Config, Provider) yüklüyoruz.
+|
+*/
+
+try {
+    // 1. App'i başlat
+    $app = App::getInstance(__DIR__); //
+
+    // 2. Çevre değişkenlerini (.env) yükle
+    $app->loadEnvironment(); //
+
+    // 3. Konfigürasyon dosyalarını (config/*.php) yükle
+    $app->loadConfiguration(); //
+
+    // 4. Servis Sağlayıcıları (Provider) kaydet ve boot et
+    $app->registerProviders(); //
+
+    /*
+    |--------------------------------------------------------------------------
+    | Konsol Uygulamasını Başlat
+    |--------------------------------------------------------------------------
+    */
+
+    // 1. Yeni bir konsol uygulaması oluştur
+    $cli = new Application('Zephyr Framework CLI', $app->version());
+
+    // 2. Komutları config dosyasından yükle
+    $commands = require __DIR__ . '/config/console.php';
+
+    foreach ($commands as $commandClass) {
+        // Komutları container üzerinden çözerek ekle (DI desteği için)
+        $cli->add($app->resolve($commandClass));
+    }
+
+    // 3. CLI'ı çalıştır
+    $cli->run();
+
+} catch (\Throwable $e) {
+    // CLI modunda basit hata çıktısı
+    echo "Hata: " . $e->getMessage() . PHP_EOL;
+    echo "Dosya: " . $e->getFile() . " (Satır: " . $e->getLine() . ")" . PHP_EOL;
+    exit(1);
+}
