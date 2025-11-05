@@ -5,329 +5,327 @@ declare(strict_types=1);
 namespace Zephyr\Http\Middleware;
 
 use Closure;
-use Zephyr\Http\{Request, Response};
-use Zephyr\Exceptions\Http\RateLimitException;
+use Zephyr\Http\Request;
+use Zephyr\Http\Response;
 use Zephyr\Support\Config;
+use Zephyr\Support\Maintenance;
 
 /**
  * Rate Limit Middleware
  *
- * Protects API from abuse by limiting the number of requests
- * a client can make within a time window.
+ * Implements token bucket algorithm with file-based storage.
+ * Features lazy cleanup and probabilistic garbage collection.
  *
- * Uses Token Bucket algorithm with file-based storage.
- *
- * @author  Ahmet ALTUN
- * @email   ahmet.altun60@gmail.com
- * @github  https://github.com/biyonik
+ * @author Ahmet ALTUN
+ * @email ahmet.altun60@gmail.com
+ * @github github.com/biyonik
  */
-class RateLimitMiddleware implements MiddlewareInterface
+class RateLimitMiddleware
 {
-    /**
-     * Maximum requests allowed per window
-     */
-    protected int $maxAttempts;
+    private string $storageDir;
+    private int $maxAttempts;
+    private int $decayMinutes;
 
-    /**
-     * Time window in seconds
-     */
-    protected int $decaySeconds;
-
-    /**
-     * Storage path for rate limit data
-     */
-    protected string $storagePath;
-
-    /**
-     * Constructor
-     */
     public function __construct()
     {
-        $this->maxAttempts = (int) Config::get('app.rate_limit_per_minute', 60);
-        $this->decaySeconds = 60; // 1 minute
-        $this->storagePath = storage_path('framework/rate-limits');
+        $config = Config::get('rate_limit');
+        $this->storageDir = $config['storage_path'];
+        $this->maxAttempts = $config['max_attempts'];
+        $this->decayMinutes = $config['decay_minutes'];
 
-        // Ensure storage directory exists
-        if (!is_dir($this->storagePath)) {
-            mkdir($this->storagePath, 0755, true);
+        // Ensure directory exists
+        if (!is_dir($this->storageDir) && !mkdir($concurrentDirectory = $this->storageDir, 0755, true) && !is_dir($concurrentDirectory)) {
+            throw new \RuntimeException(sprintf('Directory "%s" was not created', $concurrentDirectory));
         }
     }
 
-    /**
-     * Handle rate limiting
-     *
-     * @param Request $request
-     * @param Closure $next
-     * @return Response
-     *
-     * @throws RateLimitException If rate limit exceeded
-     */
     public function handle(Request $request, Closure $next): Response
     {
         $key = $this->resolveRequestSignature($request);
+        $ttl = $this->decayMinutes * 60;
+        $expiresAt = time() + $ttl;
+
+        // Get file path with embedded TTL
+        $file = $this->getFilePath($key, $expiresAt);
+
+        // LAZY CLEANUP: Check if file exists and is expired
+        $data = $this->readFileWithLazyCleanup($file);
+
+        // Initialize or get current attempts
+        $attempts = $data['attempts'] ?? 0;
+        $resetAt = $data['reset_at'] ?? $expiresAt;
+
+        // Check if window has expired (reset counter)
+        if ($resetAt <= time()) {
+            $attempts = 0;
+            $resetAt = $expiresAt;
+        }
+
+        // Increment attempts
+        $attempts++;
 
         // Check if rate limit exceeded
-        if (!$this->tooManyAttempts($key)) {
-            // Increment attempts
-            $this->hit($key);
+        if ($attempts > $this->maxAttempts) {
+            $retryAfter = $resetAt - time();
 
-            // Process request
-            $response = $next($request);
-
-            // Add rate limit headers
-            return $this->addHeaders(
-                $response,
-                $this->maxAttempts,
-                $this->availableAttempts($key)
-            );
+            return Response::json([
+                'error' => 'Too many requests',
+                'message' => 'Rate limit exceeded',
+                'retry_after' => $retryAfter
+            ], 429)->withHeaders([
+                'X-RateLimit-Limit' => $this->maxAttempts,
+                'X-RateLimit-Remaining' => 0,
+                'X-RateLimit-Reset' => $resetAt,
+                'Retry-After' => $retryAfter
+            ]);
         }
 
-        // Rate limit exceeded
-        throw new RateLimitException(
-            'Too many requests. Please slow down.',
-            $this->getHeaders($key)
-        );
-    }
-
-    /**
-     * Resolve unique signature for the request
-     *
-     * Uses IP address, path, User-Agent, and (if available) User ID
-     * to create a secure request fingerprint.
-     *
-     * @param Request $request
-     * @return string
-     */
-    protected function resolveRequestSignature(Request $request): string
-    {
-        // GÜVENLİK YAMASI: (report.md - Güvenlik Açığı #2)
-        // İmzayı daha güçlü hale getir.
-        
-        $ip = $request->ip(); //
-        $route = $request->path(); //
-        $userAgent = $request->header('User-Agent', 'unknown'); //
-        
-        // Kullanıcı giriş yapmışsa JWT payload'ından 'sub' (subject/ID)
-        // bilgisini al. (Bkz: AuthMiddleware)
-        $userId = 'guest';
-        if (app()->has('auth.user')) { //
-            $userPayload = app('auth.user');
-            // Genellikle JWT 'sub' (subject) alanı kullanıcı ID'sini tutar
-            $userId = $userPayload->sub ?? 'authenticated_user_no_sub';
-        }
-
-        // Tüm bileşenleri birleştir
-        $components = [
-            $ip,
-            $route,
-            $userAgent,
-            $userId
-        ];
-
-        // sha1 yerine sha256 kullan (report.md önerisi)
-        return hash('sha256', implode('|', $components));
-    }
-
-    /**
-     * Check if too many attempts have been made
-     *
-     * @param string $key
-     * @return bool
-     */
-    protected function tooManyAttempts(string $key): bool
-    {
-        return $this->attempts($key) >= $this->maxAttempts;
-    }
-
-    /**
-     * Increment the counter for a given key
-     *
-     * @param string $key
-     * @return int New attempt count
-     */
-    protected function hit(string $key): int
-    {
-        $attempts = $this->attempts($key) + 1;
-        $expiresAt = time() + $this->decaySeconds;
-
-        $this->store($key, [
+        // Save updated data
+        $this->writeFile($file, [
             'attempts' => $attempts,
+            'reset_at' => $resetAt,
             'expires_at' => $expiresAt
         ]);
 
-        return $attempts;
+        // Continue to next middleware/controller
+        $response = $next($request);
+
+        // Add rate limit headers
+        $remaining = max(0, $this->maxAttempts - $attempts);
+
+        return $response->withHeaders([
+            'X-RateLimit-Limit' => $this->maxAttempts,
+            'X-RateLimit-Remaining' => $remaining,
+            'X-RateLimit-Reset' => $resetAt
+        ]);
     }
 
     /**
-     * Get the number of attempts for a key
+     * Generate unique request signature
      *
-     * @param string $key
-     * @return int
+     * Combines IP, method, and path to create unique identifier.
      */
-    protected function attempts(string $key): int
+    private function resolveRequestSignature(Request $request): string
     {
-        $data = $this->retrieve($key);
+        $ip = $request->ip();
+        $method = $request->method();
+        $path = $request->path();
 
-        if (!$data) {
-            return 0;
+        return "{$ip}:{$method}:{$path}";
+    }
+
+    /**
+     * Get file path with embedded expires_at timestamp
+     *
+     * Format: {hash}_{expires_at}.json
+     * This allows quick filtering without reading file contents.
+     *
+     * @param string $key Request signature
+     * @param int $expiresAt Expiration timestamp
+     * @return string Full file path
+     */
+    private function getFilePath(string $key, int $expiresAt): string
+    {
+        // Use xxHash for fast hashing (PHP 8.1+)
+        $hash = hash('xxh3', $key);
+
+        return $this->storageDir . "/{$hash}_{$expiresAt}.json";
+    }
+
+    /**
+     * Extract expires_at from filename
+     *
+     * @param string $filename Base filename (not full path)
+     * @return int|null Expiration timestamp or null if not found
+     */
+    private function extractExpiresAt(string $filename): ?int
+    {
+        // Pattern: {hash}_{timestamp}.json
+        if (preg_match('/_(\d+)\.json$/', $filename, $matches)) {
+            return (int) $matches[1];
         }
 
-        // Check if expired
-        if ($data['expires_at'] < time()) {
-            $this->clear($key);
-            return 0;
-        }
-
-        return $data['attempts'];
+        return null;
     }
 
     /**
-     * Get available attempts remaining
+     * Read file with lazy cleanup
      *
-     * @param string $key
-     * @return int
-     */
-    protected function availableAttempts(string $key): int
-    {
-        return max(0, $this->maxAttempts - $this->attempts($key));
-    }
-
-    /**
-     * Get seconds until rate limit resets
+     * If file is expired, delete it and return null.
+     * This is "lazy" because cleanup happens during normal operation.
      *
-     * @param string $key
-     * @return int
+     * @param string $file Full file path
+     * @return array|null File data or null if not exists/expired
      */
-    protected function availableIn(string $key): int
+    private function readFileWithLazyCleanup(string $file): ?array
     {
-        $data = $this->retrieve($key);
-
-        if (!$data) {
-            return 0;
-        }
-
-        return max(0, $data['expires_at'] - time());
-    }
-
-    /**
-     * Store data for a key
-     *
-     * @param string $key
-     * @param array $data
-     * @return void
-     */
-    protected function store(string $key, array $data): void
-    {
-        $file = $this->getFilePath($key);
-        file_put_contents($file, serialize($data), LOCK_EX);
-    }
-
-    /**
-     * Retrieve data for a key
-     *
-     * @param string $key
-     * @return array|null
-     */
-    protected function retrieve(string $key): ?array
-    {
-        $file = $this->getFilePath($key);
-
         if (!file_exists($file)) {
             return null;
         }
 
-        $data = unserialize(file_get_contents($file));
+        // Extract expires_at from filename (FAST - no file I/O)
+        $basename = basename($file);
+        $expiresAt = $this->extractExpiresAt($basename);
 
-        return is_array($data) ? $data : null;
-    }
-
-    /**
-     * Clear data for a key
-     *
-     * @param string $key
-     * @return void
-     */
-    protected function clear(string $key): void
-    {
-        $file = $this->getFilePath($key);
-
-        if (file_exists($file)) {
+        // Check if expired based on filename
+        if ($expiresAt !== null && $expiresAt < time()) {
+            // LAZY CLEANUP: Delete expired file
             @unlink($file);
+
+            Maintenance::log("Lazy cleanup: Deleted expired rate limit file", [
+                'file' => $basename,
+                'expired_at' => date('Y-m-d H:i:s', $expiresAt)
+            ]);
+
+            return null;
         }
+
+        // Read and parse file
+        $contents = @file_get_contents($file);
+        if ($contents === false) {
+            return null;
+        }
+
+        $data = json_decode($contents, true);
+
+        // Fallback: Check expires_at from file contents (if filename parse failed)
+        if (isset($data['expires_at']) && $data['expires_at'] < time()) {
+            @unlink($file);
+            return null;
+        }
+
+        return $data;
     }
 
     /**
-     * Get file path for a key
+     * Write data to file atomically
      *
-     * @param string $key
-     * @return string
+     * Uses atomic write (write to temp, then rename) to prevent corruption.
      */
-    protected function getFilePath(string $key): string
+    private function writeFile(string $file, array $data): void
     {
-        return $this->storagePath . '/' . $key . '.txt';
+        $tempFile = $file . '.tmp';
+
+        // Write to temp file
+        file_put_contents($tempFile, json_encode($data, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT));
+
+        // Atomic rename
+        rename($tempFile, $file);
     }
 
     /**
-     * Add rate limit headers to response
+     * Cleanup expired rate limit files
      *
-     * @param Response $response
-     * @param int $maxAttempts
-     * @param int $remainingAttempts
-     * @return Response
-     */
-    protected function addHeaders(Response $response, int $maxAttempts, int $remainingAttempts): Response
-    {
-        $response->header('X-RateLimit-Limit', (string) $maxAttempts);
-        $response->header('X-RateLimit-Remaining', (string) $remainingAttempts);
-
-        return $response;
-    }
-
-    /**
-     * Get headers for rate limit exception
+     * This is a "chunked" cleanup - processes limited number of files
+     * to prevent timeout and excessive resource usage.
      *
-     * @param string $key
-     * @return array
+     * Called probabilistically by App::terminate() or can be manually triggered.
+     *
+     * @return array Statistics about cleanup operation
+     * @throws \JsonException
      */
-    protected function getHeaders(string $key): array
+    public static function cleanup(): array
     {
-        $retryAfter = $this->availableIn($key);
+        $config = Config::get('rate_limit');
+        $storageDir = $config['storage_path'];
 
-        return [
-            'X-RateLimit-Limit' => (string) $this->maxAttempts,
-            'X-RateLimit-Remaining' => '0',
-            'Retry-After' => (string) $retryAfter,
-            'X-RateLimit-Reset' => (string) (time() + $retryAfter),
+        if (!is_dir($storageDir)) {
+            return [
+                'success' => true,
+                'cleaned' => 0,
+                'scanned' => 0,
+                'message' => 'Storage directory does not exist'
+            ];
+        }
+
+        $limits = Config::get('maintenance.limits');
+        $maxExecutionTime = $limits['max_execution_time'];
+        $maxFilesPerCycle = $limits['max_files_per_cycle'];
+
+        $startTime = time();
+        $startMicrotime = microtime(true);
+        $now = time();
+
+        $stats = [
+            'cleaned' => 0,
+            'scanned' => 0,
+            'errors' => 0,
+            'skipped' => 0,
         ];
-    }
 
-    /**
-     * Clean up expired rate limit files (maintenance)
-     *
-     * Should be called periodically (e.g., via cron)
-     *
-     * @return int Number of files cleaned
-     */
-    public static function cleanup(): int
-    {
-        $storagePath = storage_path('framework/rate-limits');
-        $cleaned = 0;
+        // Get all files in storage directory
+        $files = glob($storageDir . '/*.json');
 
-        if (!is_dir($storagePath)) {
-            return 0;
+        if ($files === false) {
+            return [
+                'success' => false,
+                'message' => 'Failed to scan storage directory',
+                ...$stats
+            ];
         }
-
-        $files = glob($storagePath . '/*.txt');
 
         foreach ($files as $file) {
-            $data = unserialize(data: file_get_contents($file), options: []);
+            // TIMEOUT PROTECTION: Check if we've exceeded max execution time
+            if ((time() - $startTime) >= $maxExecutionTime) {
+                Maintenance::log("Cleanup timeout after {$maxExecutionTime}s", $stats);
+                break;
+            }
 
-            if (is_array($data) && isset($data['expires_at']) && $data['expires_at'] < time()) {
-                @unlink($file);
-                $cleaned++;
+            // CHUNK LIMIT: Stop after processing max files
+            if ($stats['scanned'] >= $maxFilesPerCycle) {
+                Maintenance::log("Cleanup reached file limit: {$maxFilesPerCycle}", $stats);
+                break;
+            }
+
+            $stats['scanned']++;
+
+            $basename = basename($file);
+
+            // Extract expires_at from filename
+            if (preg_match('/_(\d+)\.json$/', $basename, $matches)) {
+                $expiresAt = (int) $matches[1];
+
+                // Is expired?
+                if ($expiresAt < $now) {
+                    if (@unlink($file)) {
+                        $stats['cleaned']++;
+                    } else {
+                        $stats['errors']++;
+                        Maintenance::log("Failed to delete file: {$basename}");
+                    }
+                } else {
+                    $stats['skipped']++;
+                }
+            } else {
+                // Filename doesn't match pattern - might be old format
+                // Try to read and check expires_at from content
+                $data = @json_decode(file_get_contents($file), true);
+
+                if ($data && isset($data['expires_at']) && $data['expires_at'] < $now) {
+                    if (@unlink($file)) {
+                        $stats['cleaned']++;
+                    } else {
+                        $stats['errors']++;
+                    }
+                } else {
+                    $stats['skipped']++;
+                }
             }
         }
 
-        return $cleaned;
+        $duration = round(microtime(true) - $startMicrotime, 3);
+
+        $result = [
+            'success' => true,
+            'duration_seconds' => $duration,
+            'total_files' => count($files),
+            ...$stats
+        ];
+
+        if ($stats['cleaned'] > 0) {
+            Maintenance::log("RateLimit cleanup completed", $result);
+        }
+
+        return $result;
     }
 }

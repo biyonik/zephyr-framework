@@ -25,7 +25,7 @@ class SecurityMiddlewareTest extends TestCase
     
     // --- AuthMiddleware Testleri ---
 
-    public function test_auth_middleware_rejects_without_token()
+    public function test_auth_middleware_rejects_without_token(): void
     {
         $_SERVER['REQUEST_METHOD'] = 'GET';
         $_SERVER['REQUEST_URI'] = '/protected';
@@ -34,13 +34,13 @@ class SecurityMiddlewareTest extends TestCase
         $this->app->instance(Request::class, $request);
 
         $response = $this->app->handle($request);
-        $content = json_decode($response->getContent(), true);
+        $content = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
         
         $this->assertEquals(401, $response->getStatusCode());
         $this->assertEquals('Authentication required', $content['error']['message']); //
     }
 
-    public function test_auth_middleware_rejects_with_invalid_token()
+    public function test_auth_middleware_rejects_with_invalid_token(): void
     {
         $_SERVER['REQUEST_METHOD'] = 'GET';
         $_SERVER['REQUEST_URI'] = '/protected';

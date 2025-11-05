@@ -19,7 +19,7 @@ use Zephyr\Http\Request;
 |--------------------------------------------------------------------------
 */
 
-if (version_compare(PHP_VERSION, '8.0.0', '<')) {
+if (PHP_VERSION_ID < 80000) {
     die('PHP 8.0+ required. Current version: ' . PHP_VERSION);
 }
 
@@ -111,6 +111,11 @@ try {
     $response = $app->handle($request);
     $response->send();
 
+    // This allows maintenance tasks to run without blocking user
+    if (function_exists('fastcgi_finish_request')) {
+        fastcgi_finish_request(); // Flush to client, continue processing
+    }
+
     /*
     |--------------------------------------------------------------------------
     | Terminate The Application
@@ -133,12 +138,12 @@ try {
             'file' => $e->getFile(),
             'line' => $e->getLine(),
             'trace' => array_slice($e->getTrace(), 0, 5)
-        ], JSON_PRETTY_PRINT);
+        ], JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT);
     } else {
         echo json_encode([
             'error' => true,
             'message' => 'Internal Server Error'
-        ]);
+        ], JSON_THROW_ON_ERROR);
     }
     
     // Log the error
