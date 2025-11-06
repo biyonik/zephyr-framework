@@ -48,11 +48,11 @@ class MakeMigrationCommand extends Command
      */
     protected function getMigrationPath(): string
     {
-        // base_path() helper'ı src/Support/helpers.php dosyanızdan geliyor
+        // base_path() helper'ı src/Support/helpers.php dosyanızdan geliyor [cite: biyonik/zephyr-framework/zephyr-framework-28e2066c3c9e95c1fc6a0dd198e9ea44c4e8a471/src/Support/helpers.php]
         $path = base_path('database/migrations');
 
-        if (!is_dir($path)) {
-            mkdir($path, 0755, true);
+        if (!is_dir($path) && !mkdir($path, 0755, true) && !is_dir($path)) {
+            throw new \RuntimeException(sprintf('Directory "%s" was not created', $path));
         }
 
         return $path;
@@ -60,6 +60,7 @@ class MakeMigrationCommand extends Command
 
     /**
      * Oluşturulacak dosya için şablon (stub) döndürür.
+     * (Geliştiricinin artık ham SQL görmemesi için şablonu güncelliyoruz)
      */
     protected function getStub(string $className): string
     {
@@ -69,6 +70,7 @@ class MakeMigrationCommand extends Command
 declare(strict_types=1);
 
 use Zephyr\Database\Migration;
+use Zephyr\Database\Schema\Blueprint; // <-- YENİ
 
 /**
  * Migration: {$className}
@@ -81,15 +83,13 @@ return new class extends Migration
     public function up(): void
     {
         // Örnek:
-        // $this->pdo->exec("
-        //     CREATE TABLE IF NOT EXISTS users (
-        //         id INT AUTO_INCREMENT PRIMARY KEY,
-        //         name VARCHAR(255) NOT NULL,
-        //         email VARCHAR(255) NOT NULL UNIQUE,
-        //         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        //         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        //     ) ENGINE=InnoDB;
-        // ");
+        // \$this->schema->create('users', function (Blueprint \$table) {
+        //     \$table->id();
+        //     \$table->string('name');
+        //     \$table->string('email')->unique();
+        //     \$table->string('password');
+        //     \$table->timestamps();
+        // });
     }
 
     /**
@@ -98,7 +98,7 @@ return new class extends Migration
     public function down(): void
     {
         // Örnek:
-        // $this->pdo->exec("DROP TABLE IF EXISTS users;");
+        // \$this->schema->dropIfExists('users');
     }
 };
 

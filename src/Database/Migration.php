@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Zephyr\Database;
 
-use Zephyr\Database\Connection;
+use Zephyr\Database\Schema\Builder as SchemaBuilder;
 
 /**
  * Temel Veritabanı Geçiş Sınıfı
@@ -22,12 +22,15 @@ abstract class Migration
     /**
      * Constructor.
      * Container üzerinden veritabanı bağlantısını alır.
+     * @throws \Exception
      */
     public function __construct()
     {
-        // Connection sınıfından ham PDO nesnesini alıyoruz
-        // çünkü DDL (CREATE, ALTER) işlemleri için bu daha uygundur.
-        $this->pdo = app(Connection::class)->getPdo();
+        $connection = app(Connection::class); // <-- Bağlantıyı al
+        $this->pdo = $connection->getPdo();
+
+        // YENİ: Schema Builder'ı migration sınıfı için hazırla
+        $this->schema = new SchemaBuilder($connection);
     }
 
     /**
