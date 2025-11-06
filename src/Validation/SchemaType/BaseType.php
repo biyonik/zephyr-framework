@@ -54,6 +54,12 @@ abstract class BaseType implements ValidationTypeInterface
     protected array $errorMessages = [];
 
     /**
+     * Değeri dönüştürmek için uygulanacak 'callback' fonksiyonları.
+     * @var array
+     */
+    protected array $transformations = [];
+
+    /**
      * Kurulum yapıcı metot.
      *
      * @param string|null $description Alan açıklaması
@@ -150,6 +156,38 @@ abstract class BaseType implements ValidationTypeInterface
         ];
 
         return $messages[$rule] ?? ':field alanı geçersiz';
+    }
+
+    /**
+     * Değere bir dönüşüm (temizleme) kuralı ekler.
+     * Bu, doğrulama başarılı olduktan *sonra* çalışır.
+     *
+     * @param callable $callback
+     * @return static
+     */
+    public function transform(callable $callback): self
+    {
+        $this->transformations[] = $callback;
+        return $this;
+    }
+
+    /**
+     * Kayıtlı dönüşümleri değere uygular.
+     *
+     * @param mixed $value
+     * @return mixed
+     */
+    public function applyTransformations(mixed $value): mixed
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        foreach ($this->transformations as $callback) {
+            $value = $callback($value);
+        }
+
+        return $value;
     }
 
     /**

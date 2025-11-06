@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Zephyr\Validation\SchemaType;
 
+use Zephyr\Validation\Traits\SecurityFilterTrait;
 use Zephyr\Validation\ValidationResult;
 
 /**
@@ -16,6 +17,8 @@ use Zephyr\Validation\ValidationResult;
  */
 class StringType extends BaseType
 {
+    use SecurityFilterTrait;
+
     protected ?string $label = null;
     /**
      * Minimum uzunluk
@@ -244,6 +247,44 @@ class StringType extends BaseType
     public function nullable(): self
     {
         $this->nullable = true;
+        return $this;
+    }
+
+    /**
+     * Değerin başındaki ve sonundaki boşlukları temizler.
+     */
+    public function trim(): self
+    {
+        $this->transform(function (string $value) {
+            return trim($value);
+        });
+        return $this;
+    }
+
+    /**
+     * Değerdeki tüm HTML etiketlerini temizler.
+     *
+     * @param array $allowedTags İzin verilen etiketler (örn: ['b', 'i'])
+     */
+    public function stripTags(array $allowedTags = []): self
+    {
+        $this->transform(function (string $value) use ($allowedTags) {
+            // SecurityFilterTrait'ten gelen metodu kullanıyoruz
+            return $this->stripHtmlTags($value, $allowedTags);
+        });
+        return $this;
+    }
+
+    /**
+     * XSS için HTML özel karakterlerini 'escape' eder.
+     * (Dikkat: Genellikle bu *çıkışta* yapılır, ancak gerekirse diye)
+     */
+    public function escapeHtml(): self
+    {
+        $this->transform(function (string $value) {
+            // SecurityFilterTrait'ten gelen metodu kullanıyoruz
+            return $this->preventXss($value);
+        });
         return $this;
     }
 

@@ -183,16 +183,54 @@ class ValidationSchema implements ValidationSchemaInterface
     public function validate(array $data): ValidationResult
     {
         $result = new ValidationResult($data);
+        $validatedData = $data; // Doğrulanmış ve temizlenmiş veriyi burada toplayalım
 
         foreach ($this->schema as $field => $rules) {
             $value = $data[$field] ?? null;
 
-            // Her bir kural için doğrulama
+            // 1. Doğrula (validate metodu $result'ı hatalarla doldurur)
             $rules->validate($field, $value, $result);
+
+            // 2. Dönüştür (Eğer hata yoksa veya henüz hata oluşmamışsa)
+            if ($value !== null && !$result->hasError($field)) {
+                // BaseType'a eklediğimiz yeni metodu çağır
+                $validatedData[$field] = $rules->applyTransformations($value);
+            }
         }
 
-        // Gelişmiş doğrulamaları uygula
+        // Gelişmiş doğrulamaları uygula (bunlar hata ekler, dönüşüm yapmaz)
         $this->applyAdvancedValidations($data, $result);
+
+        // 3. ValidationResult'ı güncellenmiş/temizlenmiş veriyle güncelle
+        // (Bu, ValidationResult sınıfına bir 'setValidData' metodu eklemeyi gerektirebilir)
+        // Veya en başından $result'ı $validatedData ile başlatalım...
+
+        // --- DAHA TEMİZ YAKLAŞIM ---
+        $originalData = $data;
+        $transformedData = $data;
+        $result = new ValidationResult($originalData);
+
+        foreach ($this->schema as $field => $rules) {
+            $value = $originalData[$field] ?? null;
+
+            // 1. Değeri önce dönüştür (temizle)
+            if ($value !== null) {
+                $transformedValue = $rules->applyTransformations($value);
+                $transformedData[$field] = $transformedValue;
+            } else {
+                $transformedValue = null;
+            }
+
+            // 2. Temizlenmiş değeri doğrula
+            $rules->validate($field, $transformedValue, $result);
+        }
+
+        $this->applyAdvancedValidations($transformedData, $result);
+
+        // Hata yoksa, ValidationResult'a temizlenmiş veriyi set et
+        if (!$result->hasErrors()) {
+            $result->setValidData($transformedData); // <-- Bu metodu eklememiz lazım
+        }
 
         return $result;
     }

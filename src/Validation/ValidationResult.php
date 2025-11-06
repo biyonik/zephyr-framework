@@ -72,6 +72,11 @@ class ValidationResult implements ValidationResultInterface
         return $this->data;
     }
 
+    public function setValidData(array $data): void
+    {
+        $this->data = $data;
+    }
+
     /**
      * {@inheritdoc}
      */
