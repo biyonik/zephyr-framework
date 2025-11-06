@@ -7,6 +7,7 @@ namespace Zephyr\Core;
 use Closure;
 use Zephyr\Http\{Request, Response};
 use Zephyr\Exceptions\Http\{NotFoundException, MethodNotAllowedException};
+use Zephyr\Http\Kernel;
 
 /**
  * HTTP Router
@@ -49,6 +50,19 @@ class Router
      * @var array<string, bool>
      */
     protected array $routeLookup = [];
+
+    /**
+     * YENİ: Application container
+     */
+    protected App $app;
+
+    /**
+     * Constructor güncellendi
+     */
+    public function __construct(App $app)
+    {
+        $this->app = $app;
+    }
 
     /**
      * Register a GET route
@@ -149,7 +163,7 @@ class Router
         }
 
         // YENİ: Rota tipini belirle (Controller, Closure, vb.)
-        $actionType = match(true) {
+        $actionType = match (true) {
             is_array($action) => 'controller', // [Controller::class, 'method']
             $action instanceof Closure => 'closure',
             is_string($action) => 'controller_string', // 'Controller@method'
@@ -161,7 +175,7 @@ class Router
 
             // *** YENİ GÜVENLİ ANAHTAR (Rapor #1 Çözümü) ***
             $lookupKey = $method . '::' . $uri . '::' . $actionType;
-            
+
             if (isset($this->routeLookup[$lookupKey])) {
                 // Bu rota (muhtemelen önbellekten veya
                 // api.php'de çift kayıttan) zaten eklendi.
@@ -238,19 +252,19 @@ class Router
         $this->routeLookup = [];
         foreach ($this->routes as $method => $methodRoutes) {
             foreach ($methodRoutes as $route) {
-                
+
                 // Önbelleğe SADECE Controller (array) rotalarını aldığımızı biliyoruz.
                 //
                 $action = $route->getAction(); //
-                
+
                 // Eylem tipini belirle (cache'ten gelenler her zaman array olmalı)
                 $actionType = is_array($action) ? 'controller' : 'unknown_cached_type';
-                
+
                 foreach ($route->getMethods() as $routeMethod) { //
-                    
+
                     // *** YENİ GÜVENLİ ANAHTAR (Rapor #1 Çözümü) ***
                     $lookupKey = $routeMethod . '::' . $route->getUri() . '::' . $actionType;
-                    
+
                     $this->routeLookup[$lookupKey] = true; //
                 }
             }
@@ -269,40 +283,91 @@ class Router
     }
 
     /**
-     * Dispatch request to matching route
-     * * @throws NotFoundException
+     * Dispatch metodu "Nested Pipeline" için yeniden yazıldı.
+     *
+     * @throws NotFoundException
      * @throws MethodNotAllowedException
      */
     public function dispatch(Request $request): Response
     {
-        $method = $request->method(); //
-        $uri = $request->uri(); //
+        $method = $request->method();
+        $uri = $request->uri();
 
-        // Find matching route
-        $route = $this->findRoute($method, $uri); //
+        // 1. Eşleşen rotayı bul
+        $route = $this->findRoute($method, $uri);
 
-        if (!$route) { //
-            // Check if route exists for other methods
-            if ($this->hasRouteForOtherMethods($uri, $method)) { //
-                throw new MethodNotAllowedException( //
+        // 2. 404 veya 405 (Metot Yasak) hatası ver (Mevcut kod)
+        if (!$route) {
+            if ($this->hasRouteForOtherMethods($uri, $method)) {
+                throw new MethodNotAllowedException(
                     "Method {$method} not allowed for {$uri}"
                 );
             }
-
-            throw new NotFoundException("Route not found: {$uri}"); //
+            throw new NotFoundException("Route not found: {$uri}");
         }
 
-        // Extract and set route parameters
-        $parameters = $route->extractParameters($uri); //
-        $request->setRouteParams($parameters); //
+        // 3. Rota parametrelerini ayıkla ve Request'e ekle
+        $parameters = $route->extractParameters($uri);
+        $request->setRouteParams($parameters);
 
-        // Execute route action
-        $response = $route->execute($request, $parameters); //
+        // 4. --- YENİ MİMARİ: İÇ İÇE PİPELİNE ---
 
-        // ✅ Associate request with response (for HEAD detection, etc.)
-        $response->setRequest($request); //
+        // 4a. Bu rotaya özel middleware'leri al
+        $routeMiddleware = $this->gatherRouteMiddleware($route);
 
-        return $response; //
+        // 4b. Yeni, iç içe bir Pipeline oluştur
+        $response = (new Pipeline($this->app))
+            ->send($request)
+            ->through($routeMiddleware) // <-- SADECE rotaya özel middleware'ler
+            ->then(function (Request $request) use ($route, $parameters) {
+                // 4c. Bu pipeline'ın HEDEFİ, Controller'ı çalıştırmaktır.
+                return $route->execute($request, $parameters);
+            });
+
+        // --- DEĞİŞİKLİK SONU ---
+
+        // (Eski $route->execute() çağrısı kaldırıldı, pipeline'ın 'then' bloğuna taşındı)
+
+        // 5. Yanıtı hazırla
+        $response->setRequest($request);
+        return $response;
+    }
+
+    /**
+     * YENİ METOT: Rota middleware'lerini toplar ve alias'ları çözer.
+     *
+     * @param Route $route
+     * @return array
+     * @throws \Exception
+     */
+    protected function gatherRouteMiddleware(Route $route): array
+    {
+        $middlewareNames = $route->getMiddleware(); // örn: ['auth']
+
+        if (empty($middlewareNames)) {
+            return [];
+        }
+
+        // Kernel'dan alias (takma ad) listesini al
+        // Kernel'in container'a bağlı olduğunu biliyoruz (Adım 1'de sağladık)
+        $kernel = $this->app->resolve(Kernel::class);
+        $aliases = $kernel->getRouteMiddlewareAliases(); // Kernel'a bu metodu ekleyeceğiz
+
+        $middlewareClasses = [];
+        foreach ($middlewareNames as $name) {
+            if (isset($aliases[$name])) {
+                // Alias'ı çöz: 'auth' -> \Zephyr\Http\Middleware\AuthMiddleware::class
+                $middlewareClasses[] = $aliases[$name];
+            } elseif (class_exists($name)) {
+                // Doğrudan sınıf adı verilmiş olabilir
+                $middlewareClasses[] = $name;
+            } else {
+                // Bulunamadıysa hata fırlat
+                throw new \Exception("Middleware [{$name}] not defined in Kernel.");
+            }
+        }
+
+        return $middlewareClasses;
     }
 
     /**

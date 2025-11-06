@@ -68,7 +68,7 @@ return [
     */
     'tasks' => [
         [\Zephyr\Http\Middleware\RateLimitMiddleware::class, 'cleanup'],
-        // Future: [\Zephyr\Cache\FileCache::class, 'cleanup'],
+        [\Zephyr\Cache\FileCache::class, 'cleanup'],
     ],
 
     /*

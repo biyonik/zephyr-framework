@@ -30,11 +30,14 @@ class RouteServiceProvider
      */
     public function register(): void
     {
-        // Register Router as singleton
-        $this->app->singleton(Router::class);
+        $this->app->singleton(Router::class, function ($app) {
+            return new Router($app); // <-- Router($app) olarak güncellendi
+        });
         
-        // Register HTTP Kernel
-        $this->app->singleton(Kernel::class);
+        // Kernel'ı singleton olarak kaydet, bağımlılıklarını enjekte et
+        $this->app->singleton(Kernel::class, function ($app) {
+            return new Kernel($app, $app->resolve(Router::class)); // <-- Güncellendi
+        });
     }
 
     /**

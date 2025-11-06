@@ -88,3 +88,32 @@ $router->get('/test-validation', function() {
 $router->get('/test-server-error', function() {
     throw new RuntimeException('Something went wrong!');
 });
+
+$router->post('/login', function(Request $request) {
+    $credentials = $request->only(['email', 'password']);
+    
+    $token = auth()->attempt($credentials);
+    
+    if (!$token) {
+        return Response::error('Geçersiz kimlik bilgileri', 401);
+    }
+    
+    return Response::success(['token' => $token]);
+});
+
+// 2. Korumalı Rota (Middleware Kullanımı)
+$router->get('/me', function() {
+    
+    // Auth helper'ı ile kullanıcıya erişim
+    $userPayload = auth()->user(); 
+    $userId = auth()->id();
+
+    // Veya middleware'in yüklediği kullanıcıyı DB'den çek
+    // $user = \App\Models\User::find(auth()->id());
+    
+    return Response::success([
+        'message' => 'Giriş başarılı',
+        'user_id' => $userId,
+        'token_payload' => $userPayload
+    ]);
+})->middleware('auth');

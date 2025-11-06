@@ -72,7 +72,8 @@ return [
     'providers' => [
         // Core providers
         \Zephyr\Providers\RouteServiceProvider::class,
-        \Zephyr\Providers\DatabaseServiceProvider::class,
+        // \Zephyr\Providers\DatabaseServiceProvider::class,
+        \Zephyr\Providers\AuthServiceProvider::class,
         
         // Application providers
         // \App\Providers\AppServiceProvider::class,
@@ -87,7 +88,7 @@ return [
     'aliases' => [
         'App' => \Zephyr\Core\App::class,
         'Config' => \Zephyr\Support\Config::class,
-        'DB' => \Zephyr\Database\DB::class,
+        // 'DB' => \Zephyr\Database\Connection::class,
         'Route' => \Zephyr\Core\Router::class,
     ],
 ];

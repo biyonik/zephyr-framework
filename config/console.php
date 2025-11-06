@@ -10,6 +10,10 @@
 use App\Commands\TestCommand;
 use App\Commands\OptimizeContainerCommand;
 use App\Commands\OptimizeRouteCommand;
+use App\Commands\MakeMigrationCommand;
+use App\Commands\MigrateCommand;
+use App\Commands\MakeControllerCommand;
+use App\Commands\MakeModelCommand;
 
 return [
     // Örnek komutumuzu buraya ekleyelim:
@@ -19,4 +23,10 @@ return [
     OptimizeContainerCommand::class,
     OptimizeRouteCommand::class,
     // \App\Commands\MakeControllerCommand::class,
+    // Veritabanı Geçiş Komutları
+    MakeMigrationCommand::class,
+    MigrateCommand::class,
+
+    MakeControllerCommand::class,
+    MakeModelCommand::class,
 ];

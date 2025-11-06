@@ -41,4 +41,11 @@ return [
         */
         'issuer' => env('APP_URL', 'http://localhost'), //
     ],
+
+    /**
+     * Authentication providers
+     */
+    'provider' => [
+        'model' => \App\Models\User::class,
+    ]
 ];

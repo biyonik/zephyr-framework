@@ -269,3 +269,13 @@ if (!function_exists('rescue')) {
         }
     }
 }
+
+if (!function_exists('auth')) {
+    /**
+     * AuthManager'a veya giriş yapmış kullanıcıya hızlı erişim sağlar.
+     */
+    function auth(): \Zephyr\Auth\AuthManager
+    {
+        return app('auth');
+    }
+}

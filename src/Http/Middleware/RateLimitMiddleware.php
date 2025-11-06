@@ -20,33 +20,69 @@ use Zephyr\Support\Maintenance;
  * @email ahmet.altun60@gmail.com
  * @github github.com/biyonik
  */
-class RateLimitMiddleware
+class RateLimitMiddleware implements \Zephyr\Http\Middleware\MiddlewareInterface
 {
     private string $storageDir;
     private int $maxAttempts;
     private int $decayMinutes;
+    private array $skipConfig;
+    private bool $enabled;
 
     public function __construct()
     {
+        // *** DEFENSIVE: Get config with fallback ***
         $config = Config::get('rate_limit');
-        $this->storageDir = $config['storage_path'];
-        $this->maxAttempts = $config['max_attempts'];
-        $this->decayMinutes = $config['decay_minutes'];
+        
+        if (!is_array($config)) {
+            // Config not loaded - use safe defaults
+            $this->enabled = false;
+            $this->storageDir = sys_get_temp_dir() . '/zephyr-rate-limits';
+            $this->maxAttempts = 60;
+            $this->decayMinutes = 1;
+            $this->skipConfig = ['ips' => [], 'local_env' => true];
+            
+            error_log('WARNING: rate_limit config not found, rate limiting disabled');
+            return;
+        }
+        
+        $this->enabled = $config['enabled'] ?? true;
+        $this->storageDir = $config['storage_path'] ?? sys_get_temp_dir() . '/zephyr-rate-limits';
+        $this->maxAttempts = $config['max_attempts'] ?? 60;
+        $this->decayMinutes = $config['decay_minutes'] ?? 1;
+        $this->skipConfig = $config['skip'] ?? ['ips' => [], 'local_env' => true];
 
         // Ensure directory exists
-        if (!is_dir($this->storageDir) && !mkdir($concurrentDirectory = $this->storageDir, 0755, true) && !is_dir($concurrentDirectory)) {
-            throw new \RuntimeException(sprintf('Directory "%s" was not created', $concurrentDirectory));
+        if (!is_dir($this->storageDir)) {
+            if (!@mkdir($this->storageDir, 0755, true) && !is_dir($this->storageDir)) {
+                error_log("WARNING: Could not create rate limit storage directory: {$this->storageDir}");
+                $this->enabled = false;
+            }
         }
     }
 
     public function handle(Request $request, Closure $next): Response
     {
+        // *** DEFENSIVE: Check if enabled ***
+        if (!$this->enabled) {
+            return $next($request);
+        }
+        
+        // Check skip conditions
+        if ($this->shouldSkip($request)) {
+            return $next($request);
+        }
+        
+        // Check for route-specific limits
+        $this->applyRouteSpecificLimits($request);
+        
         $key = $this->resolveRequestSignature($request);
-        $ttl = $this->decayMinutes * 60;
-        $expiresAt = time() + $ttl;
-
-        // Get file path with embedded TTL
-        $file = $this->getFilePath($key, $expiresAt);
+        
+        // Calculate window start time (rounded to decay window)
+        $windowStartTime = $this->calculateWindowStart();
+        $expiresAt = $windowStartTime + ($this->decayMinutes * 60);
+        
+        // Get file path with window start time
+        $file = $this->getFilePath($key, $windowStartTime);
 
         // LAZY CLEANUP: Check if file exists and is expired
         $data = $this->readFileWithLazyCleanup($file);
@@ -66,25 +102,26 @@ class RateLimitMiddleware
 
         // Check if rate limit exceeded
         if ($attempts > $this->maxAttempts) {
-            $retryAfter = $resetAt - time();
+            $retryAfter = max(0, $resetAt - time());
 
             return Response::json([
                 'error' => 'Too many requests',
                 'message' => 'Rate limit exceeded',
                 'retry_after' => $retryAfter
             ], 429)->withHeaders([
-                'X-RateLimit-Limit' => $this->maxAttempts,
-                'X-RateLimit-Remaining' => 0,
-                'X-RateLimit-Reset' => $resetAt,
-                'Retry-After' => $retryAfter
+                'X-RateLimit-Limit' => (string)$this->maxAttempts,
+                'X-RateLimit-Remaining' => '0',
+                'X-RateLimit-Reset' => (string)$resetAt,
+                'Retry-After' => (string)$retryAfter
             ]);
         }
 
-        // Save updated data
-        $this->writeFile($file, [
+        // Save updated data with file lock to prevent race conditions
+        $this->writeFileWithLock($file, [
             'attempts' => $attempts,
             'reset_at' => $resetAt,
-            'expires_at' => $expiresAt
+            'expires_at' => $expiresAt,
+            'window_start' => $windowStartTime
         ]);
 
         // Continue to next middleware/controller
@@ -94,68 +131,127 @@ class RateLimitMiddleware
         $remaining = max(0, $this->maxAttempts - $attempts);
 
         return $response->withHeaders([
-            'X-RateLimit-Limit' => $this->maxAttempts,
-            'X-RateLimit-Remaining' => $remaining,
-            'X-RateLimit-Reset' => $resetAt
+            'X-RateLimit-Limit' => (string)$this->maxAttempts,
+            'X-RateLimit-Remaining' => (string)$remaining,
+            'X-RateLimit-Reset' => (string)$resetAt
         ]);
+    }
+    
+    /**
+     * Check if rate limiting should be skipped for this request
+     */
+    private function shouldSkip(Request $request): bool
+    {
+        // Skip in local environment
+        if (($this->skipConfig['local_env'] ?? false)) {
+            $env = Config::get('app.env', 'production');
+            if ($env === 'local' || $env === 'development') {
+                return true;
+            }
+        }
+        
+        // Skip for whitelisted IPs
+        $skipIps = $this->skipConfig['ips'] ?? [];
+        if (!empty($skipIps)) {
+            $clientIp = $request->ip();
+            if (in_array($clientIp, $skipIps, true)) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Apply route-specific rate limits if defined
+     */
+    private function applyRouteSpecificLimits(Request $request): void
+    {
+        $routes = Config::get('rate_limit.routes', []);
+        
+        if (!is_array($routes)) {
+            return;
+        }
+        
+        $path = $request->path();
+        
+        if (isset($routes[$path]) && is_array($routes[$path])) {
+            $routeConfig = $routes[$path];
+            
+            if (isset($routeConfig['max_attempts'])) {
+                $this->maxAttempts = (int)$routeConfig['max_attempts'];
+            }
+            
+            if (isset($routeConfig['decay_minutes'])) {
+                $this->decayMinutes = (int)$routeConfig['decay_minutes'];
+            }
+        }
+    }
+    
+    /**
+     * Calculate window start time
+     * 
+     * Rounds down to the nearest decay window.
+     * Example: If decay is 1 minute, rounds to minute boundary.
+     */
+    private function calculateWindowStart(): int
+    {
+        $decaySeconds = $this->decayMinutes * 60;
+        return (int)(floor(time() / $decaySeconds) * $decaySeconds);
     }
 
     /**
      * Generate unique request signature
-     *
-     * Combines IP, method, and path to create unique identifier.
      */
     private function resolveRequestSignature(Request $request): string
     {
-        $ip = $request->ip();
-        $method = $request->method();
-        $path = $request->path();
-
-        return "{$ip}:{$method}:{$path}";
+        $strategy = Config::get('rate_limit.signature', 'ip_and_route');
+        
+        return match($strategy) {
+            'ip' => $request->ip(),
+            'user' => $this->getUserIdentifier($request),
+            'ip_and_route' => $request->ip() . ':' . $request->method() . ':' . $request->path(),
+            default => $request->ip() . ':' . $request->method() . ':' . $request->path()
+        };
+    }
+    
+    /**
+     * Get user identifier (for authenticated requests)
+     */
+    private function getUserIdentifier(Request $request): string
+    {
+        // If user is authenticated, use user ID
+        $user = $request->user();
+        if ($user && isset($user->id)) {
+            return 'user:' . $user->id;
+        }
+        
+        // Fallback to IP
+        return 'guest:' . $request->ip();
     }
 
     /**
-     * Get file path with embedded expires_at timestamp
-     *
-     * Format: {hash}_{expires_at}.json
-     * This allows quick filtering without reading file contents.
-     *
-     * @param string $key Request signature
-     * @param int $expiresAt Expiration timestamp
-     * @return string Full file path
+     * Get file path with embedded window start timestamp
      */
-    private function getFilePath(string $key, int $expiresAt): string
+    private function getFilePath(string $key, int $windowStart): string
     {
-        // Use xxHash for fast hashing (PHP 8.1+)
         $hash = hash('xxh3', $key);
-
-        return $this->storageDir . "/{$hash}_{$expiresAt}.json";
+        return $this->storageDir . "/{$hash}_{$windowStart}.json";
     }
 
     /**
-     * Extract expires_at from filename
-     *
-     * @param string $filename Base filename (not full path)
-     * @return int|null Expiration timestamp or null if not found
+     * Extract window start from filename
      */
-    private function extractExpiresAt(string $filename): ?int
+    private function extractWindowStart(string $filename): ?int
     {
-        // Pattern: {hash}_{timestamp}.json
         if (preg_match('/_(\d+)\.json$/', $filename, $matches)) {
             return (int) $matches[1];
         }
-
         return null;
     }
 
     /**
      * Read file with lazy cleanup
-     *
-     * If file is expired, delete it and return null.
-     * This is "lazy" because cleanup happens during normal operation.
-     *
-     * @param string $file Full file path
-     * @return array|null File data or null if not exists/expired
      */
     private function readFileWithLazyCleanup(string $file): ?array
     {
@@ -163,32 +259,44 @@ class RateLimitMiddleware
             return null;
         }
 
-        // Extract expires_at from filename (FAST - no file I/O)
         $basename = basename($file);
-        $expiresAt = $this->extractExpiresAt($basename);
+        $windowStart = $this->extractWindowStart($basename);
 
-        // Check if expired based on filename
-        if ($expiresAt !== null && $expiresAt < time()) {
-            // LAZY CLEANUP: Delete expired file
-            @unlink($file);
+        if ($windowStart !== null) {
+            $expiresAt = $windowStart + ($this->decayMinutes * 60);
+            
+            if ($expiresAt < time()) {
+                @unlink($file);
+                
+                Maintenance::log("Lazy cleanup: Deleted expired rate limit file", [
+                    'file' => $basename,
+                    'expired_at' => date('Y-m-d H:i:s', $expiresAt)
+                ]);
 
-            Maintenance::log("Lazy cleanup: Deleted expired rate limit file", [
-                'file' => $basename,
-                'expired_at' => date('Y-m-d H:i:s', $expiresAt)
-            ]);
-
-            return null;
+                return null;
+            }
         }
 
-        // Read and parse file
-        $contents = @file_get_contents($file);
+        $fp = @fopen($file, 'r');
+        if ($fp === false) {
+            return null;
+        }
+        
+        if (!flock($fp, LOCK_SH)) {
+            fclose($fp);
+            return null;
+        }
+        
+        $contents = stream_get_contents($fp);
+        flock($fp, LOCK_UN);
+        fclose($fp);
+        
         if ($contents === false) {
             return null;
         }
 
         $data = json_decode($contents, true);
 
-        // Fallback: Check expires_at from file contents (if filename parse failed)
         if (isset($data['expires_at']) && $data['expires_at'] < time()) {
             @unlink($file);
             return null;
@@ -198,36 +306,66 @@ class RateLimitMiddleware
     }
 
     /**
+     * Write data to file atomically with file lock
+     */
+    private function writeFileWithLock(string $file, array $data): void
+    {
+        if (file_exists($file)) {
+            $fp = @fopen($file, 'r+');
+            if ($fp === false) {
+                $this->writeFile($file, $data);
+                return;
+            }
+            
+            if (flock($fp, LOCK_EX)) {
+                $contents = stream_get_contents($fp);
+                $currentData = $contents ? @json_decode($contents, true) : null;
+                
+                if ($currentData && isset($currentData['attempts'])) {
+                    $data['attempts'] = max($data['attempts'], $currentData['attempts'] + 1);
+                }
+                
+                ftruncate($fp, 0);
+                rewind($fp);
+                fwrite($fp, json_encode($data, JSON_PRETTY_PRINT));
+                
+                flock($fp, LOCK_UN);
+            }
+            
+            fclose($fp);
+        } else {
+            $this->writeFile($file, $data);
+        }
+    }
+    
+    /**
      * Write data to file atomically
-     *
-     * Uses atomic write (write to temp, then rename) to prevent corruption.
      */
     private function writeFile(string $file, array $data): void
     {
-        $tempFile = $file . '.tmp';
-
-        // Write to temp file
-        file_put_contents($tempFile, json_encode($data, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT));
-
-        // Atomic rename
-        rename($tempFile, $file);
+        $tempFile = $file . '.tmp.' . uniqid('', true);
+        @file_put_contents($tempFile, json_encode($data, JSON_PRETTY_PRINT));
+        @rename($tempFile, $file);
     }
 
     /**
      * Cleanup expired rate limit files
-     *
-     * This is a "chunked" cleanup - processes limited number of files
-     * to prevent timeout and excessive resource usage.
-     *
-     * Called probabilistically by App::terminate() or can be manually triggered.
-     *
-     * @return array Statistics about cleanup operation
-     * @throws \JsonException
      */
     public static function cleanup(): array
     {
+        // *** DEFENSIVE: Get config with fallback ***
         $config = Config::get('rate_limit');
-        $storageDir = $config['storage_path'];
+        
+        if (!is_array($config)) {
+            return [
+                'success' => false,
+                'message' => 'rate_limit config not loaded',
+                'cleaned' => 0,
+                'scanned' => 0
+            ];
+        }
+        
+        $storageDir = $config['storage_path'] ?? sys_get_temp_dir() . '/zephyr-rate-limits';
 
         if (!is_dir($storageDir)) {
             return [
@@ -238,9 +376,13 @@ class RateLimitMiddleware
             ];
         }
 
-        $limits = Config::get('maintenance.limits');
-        $maxExecutionTime = $limits['max_execution_time'];
-        $maxFilesPerCycle = $limits['max_files_per_cycle'];
+        $limits = Config::get('maintenance.limits', [
+            'max_execution_time' => 5,
+            'max_files_per_cycle' => 1000
+        ]);
+        
+        $maxExecutionTime = $limits['max_execution_time'] ?? 5;
+        $maxFilesPerCycle = $limits['max_files_per_cycle'] ?? 1000;
 
         $startTime = time();
         $startMicrotime = microtime(true);
@@ -253,8 +395,7 @@ class RateLimitMiddleware
             'skipped' => 0,
         ];
 
-        // Get all files in storage directory
-        $files = glob($storageDir . '/*.json');
+        $files = @glob($storageDir . '/*.json');
 
         if ($files === false) {
             return [
@@ -264,28 +405,26 @@ class RateLimitMiddleware
             ];
         }
 
+        $decayMinutes = $config['decay_minutes'] ?? 1;
+
         foreach ($files as $file) {
-            // TIMEOUT PROTECTION: Check if we've exceeded max execution time
             if ((time() - $startTime) >= $maxExecutionTime) {
                 Maintenance::log("Cleanup timeout after {$maxExecutionTime}s", $stats);
                 break;
             }
 
-            // CHUNK LIMIT: Stop after processing max files
             if ($stats['scanned'] >= $maxFilesPerCycle) {
                 Maintenance::log("Cleanup reached file limit: {$maxFilesPerCycle}", $stats);
                 break;
             }
 
             $stats['scanned']++;
-
             $basename = basename($file);
 
-            // Extract expires_at from filename
             if (preg_match('/_(\d+)\.json$/', $basename, $matches)) {
-                $expiresAt = (int) $matches[1];
+                $windowStart = (int) $matches[1];
+                $expiresAt = $windowStart + ($decayMinutes * 60);
 
-                // Is expired?
                 if ($expiresAt < $now) {
                     if (@unlink($file)) {
                         $stats['cleaned']++;
@@ -297,8 +436,6 @@ class RateLimitMiddleware
                     $stats['skipped']++;
                 }
             } else {
-                // Filename doesn't match pattern - might be old format
-                // Try to read and check expires_at from content
                 $data = @json_decode(file_get_contents($file), true);
 
                 if ($data && isset($data['expires_at']) && $data['expires_at'] < $now) {

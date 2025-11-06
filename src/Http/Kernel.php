@@ -334,4 +334,14 @@ class Kernel
     {
         $this->middlewarePriority[$middleware] = $priority;
     }
+
+    /**
+     * YENİ METOT: Router'ın takma adları çözebilmesi için.
+     *
+     * @return array<string, class-string>
+     */
+    public function getRouteMiddlewareAliases(): array
+    {
+        return $this->routeMiddleware;
+    }
 }
