@@ -7,6 +7,10 @@ namespace Zephyr\Http;
 use Throwable;
 use Zephyr\Core\{App, Pipeline, Router};
 use Zephyr\Exceptions\Handler as ExceptionHandler;
+use Zephyr\Http\Middleware\AuthMiddleware;
+use Zephyr\Http\Middleware\CorsMiddleware;
+use Zephyr\Http\Middleware\RateLimitMiddleware;
+use Zephyr\Http\Middleware\SecurityHeadersMiddleware;
 
 /**
  * HTTP Kernel
@@ -43,8 +47,9 @@ class Kernel
         // Global middleware will be registered here
         // Example:
         // \Zephyr\Http\Middleware\TrustedProxies::class,
-        \Zephyr\Http\Middleware\CorsMiddleware::class,
-        \Zephyr\Http\Middleware\RateLimitMiddleware::class,
+        CorsMiddleware::class,
+        RateLimitMiddleware::class,
+        SecurityHeadersMiddleware::class
     ];
 
     /**
@@ -57,7 +62,7 @@ class Kernel
     protected array $routeMiddleware = [
         // Route middleware aliases will be registered here
         // Example:
-        'auth' => \Zephyr\Http\Middleware\AuthMiddleware::class,
+        'auth' => AuthMiddleware::class,
         // 'throttle' => \Zephyr\Http\Middleware\ThrottleRequests::class,
     ];
 
