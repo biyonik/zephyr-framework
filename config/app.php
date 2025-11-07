@@ -8,6 +8,13 @@
  * @github  https://github.com/biyonik
  */
 
+use Zephyr\Core\App;
+use Zephyr\Core\Router;
+use Zephyr\Providers\AuthServiceProvider;
+use Zephyr\Providers\LogServiceProvider;
+use Zephyr\Providers\RouteServiceProvider;
+use Zephyr\Support\Config;
+
 return [
     /*
     |--------------------------------------------------------------------------
@@ -71,9 +78,10 @@ return [
     */
     'providers' => [
         // Core providers
-        \Zephyr\Providers\RouteServiceProvider::class,
+        RouteServiceProvider::class,
         // \Zephyr\Providers\DatabaseServiceProvider::class,
-        \Zephyr\Providers\AuthServiceProvider::class,
+        AuthServiceProvider::class,
+        LogServiceProvider::class
         
         // Application providers
         // \App\Providers\AppServiceProvider::class,
@@ -86,9 +94,9 @@ return [
     | Class aliases to be registered when the application boots.
     */
     'aliases' => [
-        'App' => \Zephyr\Core\App::class,
-        'Config' => \Zephyr\Support\Config::class,
+        'App' => App::class,
+        'Config' => Config::class,
         // 'DB' => \Zephyr\Database\Connection::class,
-        'Route' => \Zephyr\Core\Router::class,
+        'Route' => Router::class,
     ],
 ];

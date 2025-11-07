@@ -10,10 +10,13 @@ declare(strict_types=1);
  * @github  https://github.com/biyonik
  */
 
+use Zephyr\Auth\AuthManager;
 use Zephyr\Core\App;
 use Zephyr\Database\Connection;
 use Zephyr\Database\QueryBuilder;
 use Zephyr\Http\Response;
+use Zephyr\Logging\LogManager;
+use Zephyr\Support\Collection;
 use Zephyr\Support\Config;
 use Zephyr\Support\Env;
 use Zephyr\Http\Request;
@@ -148,9 +151,9 @@ if (!function_exists('class_basename')) {
 }
 
 if (!function_exists('collect')) {
-    function collect(mixed $value = []): \Zephyr\Support\Collection
+    function collect(mixed $value = []): Collection
     {
-        return new \Zephyr\Support\Collection($value);
+        return new Collection($value);
     }
 }
 
@@ -274,8 +277,33 @@ if (!function_exists('auth')) {
     /**
      * AuthManager'a veya giriş yapmış kullanıcıya hızlı erişim sağlar.
      */
-    function auth(): \Zephyr\Auth\AuthManager
+    function auth(): AuthManager
     {
         return app('auth');
+    }
+}
+
+if (!function_exists('log')) {
+    /**
+     * Gelişmiş loglama sistemine bir kayıt gönderir.
+     *
+     * Kullanım:
+     * log("Bir bilgi mesajı"); // Varsayılan (info) seviyede loglar
+     * log()->error("Bir hata oluştu", ['exception' => $e]); // Hata seviyesinde loglar
+     * log()->channel('security')->warning("Güvenlik uyarısı"); // Farklı kanala loglar
+     *
+     * @param string|null $message Log mesajı (null ise LogManager'ı döndürür)
+     * @param array $context Ekstra veri
+     * @return LogManager|void
+     */
+    function log(string $message = null, array $context = [])
+    {
+        $logger = app('log');
+
+        if (is_null($message)) {
+            return $logger;
+        }
+
+        $logger->info($message, $context);
     }
 }
