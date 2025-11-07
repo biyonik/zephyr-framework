@@ -307,3 +307,16 @@ if (!function_exists('log')) {
         $logger->info($message, $context);
     }
 }
+
+if (!function_exists('event')) {
+    /**
+     * Yeni bir olayı (event) tetikler ve dinleyicilerine dağıtır.
+     *
+     * @param object $event Tetiklenecek olay nesnesi
+     * @return void
+     */
+    function event(object $event): void
+    {
+        app('event')->dispatch($event);
+    }
+}
