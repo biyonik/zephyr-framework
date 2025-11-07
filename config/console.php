@@ -7,6 +7,11 @@
  * uygulamasına otomatik olarak yüklenecektir.
  */
 
+use App\Commands\ConfigCacheCommand;
+use App\Commands\ConfigClearCommand;
+use App\Commands\MakeEventCommand;
+use App\Commands\MakeListenerCommand;
+use App\Commands\MakeSeederCommand;
 use App\Commands\TestCommand;
 use App\Commands\OptimizeContainerCommand;
 use App\Commands\OptimizeRouteCommand;
@@ -31,4 +36,12 @@ return [
 
     MakeControllerCommand::class,
     MakeModelCommand::class,
+
+    MakeEventCommand::class,
+    MakeListenerCommand::class,
+
+    ConfigCacheCommand::class,
+    ConfigClearCommand::class,
+
+    MakeSeederCommand::class
 ];

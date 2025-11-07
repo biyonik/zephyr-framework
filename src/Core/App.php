@@ -163,8 +163,19 @@ class App
      */
     public function loadConfiguration(): void
     {
-        Config::load($this->basePath . '/config');
+        // YENİ: Önbellek dosyasını kontrol et
+        $cacheFile = $this->basePath . '/storage/framework/cache/config.php';
 
+        if (file_exists($cacheFile)) {
+            // 1. Önbellekten Yükle (Hızlı)
+            $config = require $cacheFile;
+            Config::setAll($config); // Config::setAll() metodunu ekleyeceğiz
+            $this->instance('config_cached', true);
+        } else {
+            // 2. Dosyalardan Yükle (Yavaş)
+            Config::load($this->basePath . '/config');
+            $this->instance('config_cached', false);
+        }
         // Set default timezone
         date_default_timezone_set(Config::get('app.timezone', 'UTC'));
 

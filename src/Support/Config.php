@@ -127,6 +127,17 @@ class Config
     }
 
     /**
+     * YENİ: Önbellekten yüklenen tüm config dizisini ayarlar.
+     * Bu metot, App::loadConfiguration() tarafından kullanılır.
+     *
+     * @param array $items Önbelleğe alınmış yapılandırma dizisi
+     */
+    public static function setAll(array $items): void
+    {
+        static::$items = $items;
+    }
+
+    /**
      * Clear all configuration items
      */
     public static function clear(): void
