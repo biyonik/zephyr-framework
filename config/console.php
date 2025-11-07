@@ -14,6 +14,7 @@ use App\Commands\MakeMigrationCommand;
 use App\Commands\MigrateCommand;
 use App\Commands\MakeControllerCommand;
 use App\Commands\MakeModelCommand;
+use App\Commands\MigrateRollbackCommand;
 
 return [
     // Örnek komutumuzu buraya ekleyelim:
@@ -26,6 +27,7 @@ return [
     // Veritabanı Geçiş Komutları
     MakeMigrationCommand::class,
     MigrateCommand::class,
+    MigrateRollbackCommand::class,
 
     MakeControllerCommand::class,
     MakeModelCommand::class,

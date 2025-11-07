@@ -7,6 +7,7 @@ namespace Zephyr\Database\Concerns;
 use Zephyr\Database\Relations\HasMany;
 use Zephyr\Database\Relations\BelongsTo;
 use Zephyr\Database\Relations\HasOne;
+use Zephyr\Database\Relations\BelongsToMany; // <-- YENİ
 
 /**
  * Has Relationships Trait
@@ -15,6 +16,7 @@ use Zephyr\Database\Relations\HasOne;
  * - hasMany: One-to-many relationship
  * - belongsTo: Inverse of hasMany
  * - hasOne: One-to-one relationship
+ * - belongsToMany: Many-to-many relationship // <-- YENİ
  *
  * @author  Ahmet ALTUN
  * @email   ahmet.altun60@gmail.com
@@ -37,9 +39,9 @@ trait HasRelationships
      *
      * @example
      * class User extends Model {
-     *     public function posts() {
-     *         return $this->hasMany(Post::class);
-     *     }
+     * public function posts() {
+     * return $this->hasMany(Post::class);
+     * }
      * }
      *
      * $user->posts; // Get all posts
@@ -76,9 +78,9 @@ trait HasRelationships
      *
      * @example
      * class Post extends Model {
-     *     public function user() {
-     *         return $this->belongsTo(User::class);
-     *     }
+     * public function user() {
+     * return $this->belongsTo(User::class);
+     * }
      * }
      *
      * $post->user; // Get the user
@@ -114,9 +116,9 @@ trait HasRelationships
      *
      * @example
      * class User extends Model {
-     *     public function profile() {
-     *         return $this->hasOne(Profile::class);
-     *     }
+     * public function profile() {
+     * return $this->hasOne(Profile::class);
+     * }
      * }
      *
      * $user->profile; // Get the profile
@@ -136,6 +138,62 @@ trait HasRelationships
             $this,
             $foreignKey,
             $localKey
+        );
+    }
+
+    /**
+     * Define a many-to-many relationship
+     *
+     * @param string $related Related model class
+     * @param string|null $table Pivot table
+     * @param string|null $foreignPivotKey Foreign key of this model on pivot
+     * @param string|null $relatedPivotKey Foreign key of related model on pivot
+     * @param string|null $parentKey Local key of this model
+     * @param string|null $relatedKey Local key of related model
+     * @return BelongsToMany
+     *
+     * @example
+     * class User extends Model {
+     * public function roles() {
+     * return $this->belongsToMany(Role::class);
+     * }
+     * }
+     *
+     * $user->roles; // Get all roles
+     * $user->roles()->attach(1);
+     */
+    public function belongsToMany(
+        string $related,
+        ?string $table = null,
+        ?string $foreignPivotKey = null,
+        ?string $relatedPivotKey = null,
+        ?string $parentKey = null,
+        ?string $relatedKey = null
+    ): BelongsToMany {
+        $instance = new $related;
+
+        // 1. Pivot tablo adını tahmin et:
+        // (örn: Role ve User -> role_user (alfabetik))
+        $parentName = strtolower(class_basename(static::class)); // user
+        $relatedName = strtolower(class_basename($instance)); // role
+        $models = [$parentName, $relatedName];
+        sort($models);
+        $table = $table ?? implode('_', $models); // role_user
+
+        // 2. Anahtarları tahmin et
+        $foreignPivotKey = $foreignPivotKey ?? $parentName . '_id'; // user_id
+        $relatedPivotKey = $relatedPivotKey ?? $relatedName . '_id'; // role_id
+        $parentKey = $parentKey ?? $this->getKeyName(); // users.id
+        $relatedKey = $relatedKey ?? $instance->getKeyName(); // roles.id
+
+        return new BelongsToMany(
+            $instance->newQuery(),
+            $this,
+            $table,
+            $foreignPivotKey,
+            $relatedPivotKey,
+            $parentKey,
+            $relatedKey
         );
     }
 

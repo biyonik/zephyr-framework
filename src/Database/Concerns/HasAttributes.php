@@ -40,41 +40,66 @@ trait HasAttributes
      */
     public function getAttribute(string $key): mixed
     {
-        // *** YENİ: ÖNBELLEK KONTROLÜ ***
-        // (Rapor #1 Çözümü)
-        if (array_key_exists($key, $this->attributeCache)) {
-            return $this->attributeCache[$key];
-        }
-        // *** YENİ KONTROL SONU ***
-
-
-        // 1. Check if attribute exists
-        if (!array_key_exists($key, $this->attributes)) { //
-            // Önbelleğe null yazıp dön (tekrar tekrar aranmasın)
-            $this->attributeCache[$key] = null;
+        if (!$key) {
             return null;
         }
 
-        $value = $this->attributes[$key];
+        // 1. Önbellek kontrolü (Mevcut kod - Doğru)
+        if (array_key_exists($key, $this->attributeCache)) {
+            return $this->attributeCache[$key];
+        }
 
-        // 2. Check for accessor method (getUserNameAttribute)
-        if ($this->hasGetMutator($key)) { //
-            $mutatedValue = $this->mutateAttribute($key, $value);
-            $this->attributeCache[$key] = $mutatedValue; // YENİ: Önbelleğe al
+        // 2. Yüklenmiş ilişkiler (relations) kontrolü
+        // Bu kontrol HasRelationships trait'inden gelir
+        if ($this->relationLoaded($key)) {
+            return $this->relations[$key];
+        }
+
+        // 3. Veritabanı sütunu (attributes) kontrolü
+        if (array_key_exists($key, $this->attributes)) {
+            $value = $this->attributes[$key];
+
+            // Mutator (Accessor) kontrolü
+            if ($this->hasGetMutator($key)) {
+                $mutatedValue = $this->mutateAttribute($key, $value);
+                $this->attributeCache[$key] = $mutatedValue;
+                return $mutatedValue;
+            }
+
+            // Cast (Tip Dönüşümü) kontrolü
+            if ($this->hasCast($key)) {
+                $castValue = $this->castAttribute($key, $value);
+                $this->attributeCache[$key] = $castValue;
+                return $castValue;
+            }
+
+            // Ham değeri önbelleğe al ve döndür
+            $this->attributeCache[$key] = $value;
+            return $value;
+        }
+
+        // 4. İlişki metodu (lazy loading) kontrolü
+        // Bu kontrol HasRelationships trait'inden gelir
+        if (method_exists($this, $key)) {
+            // getRelationshipFromMethod() metodu sonucu
+            // $this->relations dizisine ve önbelleğe (attributeCache) eklemelidir.
+            // NOT: getRelationshipFromMethod, sonucu $this->relations'a ekler.
+            // getAttribute'in de bunu $this->attributeCache'e eklemesi gerekir.
+            $relationValue = $this->getRelationshipFromMethod($key);
+            $this->attributeCache[$key] = $relationValue;
+            return $relationValue;
+        }
+
+        // 5. Sanal (Virtual) Accessor kontrolü (DB sütunu olmayan)
+        if ($this->hasGetMutator($key)) {
+            $mutatedValue = $this->mutateAttribute($key, null);
+            $this->attributeCache[$key] = $mutatedValue;
             return $mutatedValue;
         }
 
-        // 3. Cast attribute value
-        if ($this->hasCast($key)) { //
-            $castValue = $this->castAttribute($key, $value);
-            $this->attributeCache[$key] = $castValue; // YENİ: Önbelleğe al
-            return $castValue;
-        }
-
-        // 4. Return raw value
-        $this->attributeCache[$key] = $value; // YENİ: Ham değeri de önbelleğe al
-        return $value;
+        return null;
     }
+
 
     /**
      * Set an attribute value
@@ -319,7 +344,7 @@ trait HasAttributes
         if ($sync) {
             $this->syncOriginal(); //
         }
-        
+
         // *** YENİ: TÜM ÖNBELLEĞİ TEMİZLE ***
         // (Rapor #1 Çözümü)
         $this->clearAttributeCache();
@@ -374,7 +399,7 @@ trait HasAttributes
         $value = ucwords($value);
         return str_replace(' ', '', $value);
     }
-    
+
     /**
      * YENİ: Hesaplanmış özellik önbelleğini temizler.
      * (Rapor #1 Çözümü)

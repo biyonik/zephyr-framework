@@ -44,26 +44,6 @@ trait SecurityFilterTrait
     }
 
     /**
-     * SQL Injection'ı engeller
-     *
-     * @param string $input Güvenli hale getirilecek girdi
-     * @return string Güvenli girdi
-     */
-    public function preventSqlInjection(string $input): string
-    {
-        // Tehlikeli karakterleri temizle
-        $input = preg_replace('/[\'";`()]/', '', $input);
-
-        // SQL anahtar kelimelerini filtrele
-        $sqlKeywords = [
-            'SELECT', 'INSERT', 'UPDATE', 'DELETE',
-            'DROP', 'UNION', 'EXEC', 'TRUNCATE'
-        ];
-
-        return preg_replace('/\b(' . implode('|', $sqlKeywords) . ')\b/i', '', $input);
-    }
-
-    /**
      * Girdiyi tamamen temizler
      *
      * @param string $input Temizlenecek girdi
