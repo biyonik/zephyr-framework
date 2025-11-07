@@ -11,6 +11,7 @@ declare(strict_types=1);
  */
 
 use Zephyr\Auth\AuthManager;
+use Zephyr\Cache\CacheManager;
 use Zephyr\Core\App;
 use Zephyr\Database\Connection;
 use Zephyr\Database\QueryBuilder;
@@ -318,5 +319,22 @@ if (!function_exists('event')) {
     function event(object $event): void
     {
         app('event')->dispatch($event);
+    }
+}
+
+if (!function_exists('cache')) {
+    /**
+     * Gelişmiş cache yöneticisine erişir veya bir değer alır/atar.
+     *
+     * Kullanım:
+     * cache()->set('anahtar', 'değer', 3600);
+     * cache()->get('anahtar', 'varsayılan_değer');
+     * cache()->store('array')->set(...); // Farklı bir sürücü kullan
+     *
+     * @return CacheManager
+     */
+    function cache(): CacheManager
+    {
+        return app('cache');
     }
 }
