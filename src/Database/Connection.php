@@ -55,7 +55,19 @@ class Connection
     public static function getInstance(): self
     {
         if (is_null(self::$instance)) {
-            self::$instance = new self();
+            // ✅ Config'den oku (parametre zorunlu değil)
+            $config = [
+                'driver' => Config::get('database.default', 'mysql'),
+                'host' => Config::get('database.connections.mysql.host', '127.0.0.1'),
+                'port' => Config::get('database.connections.mysql.port', 3306),
+                'database' => Config::get('database.connections.mysql.database', ''),
+                'username' => Config::get('database.connections.mysql.username', 'root'),
+                'password' => Config::get('database.connections.mysql.password', ''),
+                'charset' => Config::get('database.connections.mysql.charset', 'utf8mb4'),
+                'collation' => Config::get('database.connections.mysql.collation', 'utf8mb4_unicode_ci'),
+            ];
+
+            self::$instance = new self($config);
         }
 
         return self::$instance;

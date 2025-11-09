@@ -77,7 +77,7 @@ class Builder extends QueryBuilder
      */
     public function first(): ?Model
     {
-        $result = parent::first();
+        $result = parent::first(); // returns ?array
 
         if (is_null($result)) {
             return null;
@@ -196,6 +196,17 @@ class Builder extends QueryBuilder
             $this->eagerLoad[$name] = $constraints;
         }
 
+        return $this;
+    }
+
+    /**
+     * Global scope olmadan sorgu oluşturur.
+     */
+    public function withoutGlobalScope(string $scope): self
+    {
+        // Bu metod global scope'ları devre dışı bırakır
+        // Şimdilik basit implementation:
+        // (Global scope sistemi tam implement edilince güncellenir)
         return $this;
     }
 

@@ -133,7 +133,20 @@ abstract class Model
      */
     protected function bootIfNotBooted(): void
     {
-        // Can be overridden for model initialization
+        $this->bootTraits();
+    }
+
+    protected function bootTraits(): void
+    {
+        $class = static::class;
+
+        foreach (class_uses_recursive($class) as $trait) {
+            $method = 'boot' . class_basename($trait);
+
+            if (method_exists($class, $method) && !method_exists(__CLASS__, $method)) {
+                static::{$method}();
+            }
+        }
     }
 
     /**
@@ -393,6 +406,11 @@ abstract class Model
      */
     public function save(): bool
     {
+        // ✅ Timestamps'i save() seviyesinde güncelle
+        if ($this->usesTimestamps() && ($this->isDirty() || !$this->exists)) {
+            $this->updateTimestamps();
+        }
+
         // Perform INSERT or UPDATE
         if ($this->exists) {
             $saved = $this->performUpdate();
@@ -413,27 +431,20 @@ abstract class Model
      */
     protected function performInsert(): bool
     {
-        // Add timestamps if enabled
-        if ($this->usesTimestamps()) {
-            $this->updateTimestamps();
-        }
+        // ✅ Timestamps zaten save()'de güncellendi
 
-        // Get attributes for insert
         $attributes = $this->getAttributesForInsert();
 
         if (empty($attributes)) {
             return true;
         }
 
-        // Insert and get ID
         $id = $this->newQuery()->insertGetId($attributes);
 
-        // Set primary key if auto-incrementing
         if ($this->incrementing) {
             $this->setAttribute($this->getKeyName(), $id);
         }
 
-        // Mark as existing
         $this->exists = true;
         $this->wasRecentlyCreated = true;
 
@@ -449,16 +460,11 @@ abstract class Model
         $dirty = $this->getDirty();
 
         if (count($dirty) === 0) {
-            return true; // Nothing to update
+            return true;
         }
 
-        // Update timestamps if enabled
-        if ($this->usesTimestamps()) {
-            $this->updateTimestamps();
-            $dirty = $this->getDirty();
-        }
+        // ✅ Timestamps zaten save()'de güncellendi ve dirty'de
 
-        // Perform update
         $affected = $this->newQuery()
             ->where($this->getKeyName(), '=', $this->getKey())
             ->update($dirty);
@@ -512,8 +518,10 @@ abstract class Model
             ->first();
 
         if ($fresh) {
-            $this->attributes = $fresh;
-            $this->syncOriginal();
+            $this->setRawAttributes($fresh, true);
+
+            // ✅ Relations cache'i de temizle
+            $this->relations = [];
         }
 
         return $this;
@@ -524,11 +532,19 @@ abstract class Model
      */
     public function replicate(array $except = []): static
     {
+        // ✅ Otomatik exclude: primary key + timestamps
+        $defaults = [$this->getKeyName()];
+
+        if ($this->usesTimestamps()) {
+            $defaults[] = $this->getCreatedAtColumn();
+            $defaults[] = $this->getUpdatedAtColumn();
+        }
+
+        $except = array_merge($defaults, $except);
+
         $attributes = array_diff_key(
             $this->attributes,
-            array_flip(array_merge([
-                $this->getKeyName(),
-            ], $except))
+            array_flip($except)
         );
 
         $instance = new static;
@@ -537,7 +553,6 @@ abstract class Model
 
         return $instance;
     }
-
     /**
      * Convert model to array
      */
@@ -628,7 +643,7 @@ abstract class Model
     /**
      * Static: Get all models
      */
-    public static function all(array $columns = ['*']): array
+    public static function all(array $columns = ['*']): Collection
     {
         return static::query()->select(...$columns)->get();
     }
@@ -639,6 +654,16 @@ abstract class Model
     public static function query(): Builder
     {
         return (new static)->newQuery();
+    }
+
+    /**
+     * ✅ YENİ: BelongsToMany ilişkilerinde pivot data'ya erişim sağlar.
+     *
+     * @return object|null
+     */
+    public function pivot(): ?object
+    {
+        return $this->getRelation('pivot');
     }
 
     /**

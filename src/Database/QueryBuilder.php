@@ -7,6 +7,7 @@ namespace Zephyr\Database;
 use PDO;
 use Zephyr\Database\Exception\DatabaseException;
 use Zephyr\Database\Query\Expression;
+use Zephyr\Support\Collection;
 
 /**
  * Query Builder
@@ -193,6 +194,13 @@ class QueryBuilder
      */
     public function whereIn(string $column, array $values, string $boolean = 'AND'): self
     {
+        // ✅ Empty array kontrolü
+        if (empty($values)) {
+            // Boş array: hiçbir kayıt match etmemeli
+            // WHERE 1 = 0 ekle (always false)
+            return $this->whereRaw('1 = 0', [], $boolean);
+        }
+
         $this->wheres[] = [
             'type' => 'in',
             'column' => $column,
@@ -201,6 +209,19 @@ class QueryBuilder
         ];
 
         $this->bindings = array_merge($this->bindings, $values);
+
+        return $this;
+    }
+
+    public function whereRaw(string $sql, array $bindings = [], string $boolean = 'AND'): self
+    {
+        $this->wheres[] = [
+            'type' => 'raw',
+            'sql' => $sql,
+            'boolean' => $boolean,
+        ];
+
+        $this->bindings = array_merge($this->bindings, $bindings);
 
         return $this;
     }
@@ -218,6 +239,13 @@ class QueryBuilder
      */
     public function whereNotIn(string $column, array $values, string $boolean = 'AND'): self
     {
+        // ✅ Empty array kontrolü
+        if (empty($values)) {
+            // Boş array: tüm kayıtlar match etmeli (NOT IN () = true for all)
+            // WHERE 1 = 1 ekle (always true) veya hiçbir şey ekleme
+            return $this; // No-op, tüm kayıtlar geçerli
+        }
+
         $this->wheres[] = [
             'type' => 'not_in',
             'column' => $column,
@@ -304,8 +332,18 @@ class QueryBuilder
      * $query->orderBy('created_at', 'DESC');
      * $query->orderBy('name')->orderBy('age', 'DESC');
      */
-    public function orderBy(string $column, string $direction = 'ASC'): self
+    public function orderBy(string|Expression $column, string $direction = 'ASC'): self
     {
+        // ✅ Expression ise direkt kullan
+        if ($column instanceof Expression) {
+            $this->orders[] = [
+                'column' => $column,
+                'direction' => '', // Expression kendi direction'ını içerir
+            ];
+            return $this;
+        }
+
+        // ✅ String ise validate et
         if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)?$/', $column)) {
             throw new \InvalidArgumentException("Invalid column name for ORDER BY: {$column}");
         }
@@ -323,6 +361,13 @@ class QueryBuilder
 
         return $this;
     }
+
+    public function orderByRaw(string $sql): self
+    {
+        return $this->orderBy(Expression::make($sql));
+    }
+
+
 
     /**
      * Order by latest (created_at DESC)
@@ -537,6 +582,7 @@ class QueryBuilder
                 'null' => $boolean . $where['column'] . ' IS NULL',
                 'not_null' => $boolean . $where['column'] . ' IS NOT NULL',
                 'between' => $boolean . $where['column'] . ' BETWEEN ? AND ?',
+                'raw' => $boolean . $where['sql'], // ✅ YENİ
                 default => '',
             };
         }
@@ -560,6 +606,10 @@ class QueryBuilder
     protected function buildOrders(): string
     {
         return implode(', ', array_map(function ($order) {
+            if ($order['column'] instanceof Expression) {
+                return $order['column']->getValue();
+            }
+
             return $order['column'] . ' ' . $order['direction'];
         }, $this->orders));
     }
@@ -589,7 +639,7 @@ class QueryBuilder
      * @example
      * $users = $query->select('*')->from('users')->get();
      */
-    public function get(): array
+    public function get(): Collection
     {
         try {
             $sql = $this->toSql();
@@ -627,7 +677,7 @@ class QueryBuilder
      * // In Model Builder
      * $user = User::query()->first();  // Returns ?Model
      */
-    public function first(): mixed
+    public function first(): ?Model
     {
         $this->limit(1);
         $results = $this->get();
@@ -931,8 +981,9 @@ class QueryBuilder
         $page = max(1, $page);
         $perPage = max(1, $perPage);
 
-        // Get total count
-        $total = $this->count();
+        // ✅ Query'yi clone et (count() state'i değiştiriyor)
+        $countQuery = clone $this;
+        $total = $countQuery->count();
 
         // Calculate pagination
         $lastPage = (int) ceil($total / $perPage);
@@ -940,7 +991,7 @@ class QueryBuilder
         $from = $total > 0 ? $offset + 1 : 0;
         $to = min($offset + $perPage, $total);
 
-        // Get data
+        // ✅ Original query'yi kullan
         $this->limit($perPage)->offset($offset);
         $data = $this->get();
 
@@ -954,6 +1005,7 @@ class QueryBuilder
             'to' => $to,
         ];
     }
+
 
     /**
      * Execute callback within transaction
@@ -1063,7 +1115,23 @@ class QueryBuilder
      */
     public function __clone()
     {
-        // Ensure arrays are deeply cloned
+        // Arrays'leri deep clone et (referans kopyalanmasın)
+        $this->columns = [...$this->columns];
+        $this->wheres = array_map(function($where) {
+            return is_array($where) ? [...$where] : $where;
+        }, $this->wheres);
+        $this->bindings = [...$this->bindings];
+        $this->joins = array_map(function($join) {
+            return [...$join];
+        }, $this->joins);
+        $this->orders = array_map(function($order) {
+            return [...$order];
+        }, $this->orders);
+        $this->groups = [...$this->groups];
+        $this->havings = array_map(function($having) {
+            return [...$having];
+        }, $this->havings);
+        $this->havingBindings = [...$this->havingBindings];
     }
 
     /**

@@ -1,3 +1,4 @@
+// src/Auth/AuthManager.php
 <?php
 
 declare(strict_types=1);
@@ -13,11 +14,8 @@ class AuthManager
     protected App $app;
     protected UserProvider $provider;
     protected JwtManager $jwt;
-    protected ?object $user = null; // Cachelenen kullanıcı payload'ı
+    protected ?Authenticatable $user = null; // ✅ Authenticatable tipinde
 
-    /**
-     * Bağımlılıklar (DI) ile otomatik olarak yüklenir
-     */
     public function __construct(App $app, UserProvider $provider, JwtManager $jwt)
     {
         $this->app = $app;
@@ -27,56 +25,59 @@ class AuthManager
 
     /**
      * Kullanıcı girişini dener ve başarılı olursa token döndürür.
-     *
-     * @param array $credentials ['email' => '...', 'password' => '...']
-     * @return string|null Başarılıysa JWT, değilse null
      */
     public function attempt(array $credentials): ?string
     {
-        // 1. Kullanıcıyı sağlayıcı (provider) aracılığıyla bul
         $user = $this->provider->retrieveByCredentials($credentials);
 
         if (!$user) {
             return null;
         }
 
-        // 2. Şifreyi doğrula
-        // (password_verify PHP'nin standart fonksiyonudur)
         if (!password_verify($credentials['password'], $user->getAuthPassword())) {
             return null;
         }
 
-        // 3. Token oluştur
         return $this->jwt->createToken($user);
     }
 
     /**
-     * O an giriş yapmış olan kullanıcıyı (veya token payload'ını) döndürür.
-     * Bu metot, AuthMiddleware'in container'a kaydettiği veriyi okur.
-     *
-     * @return object|null
+     * ✅ FIX: O an giriş yapmış olan kullanıcıyı (FULL MODEL) döndürür.
+     * JWT payload'ından ID alır, User modelini çeker ve cache'ler.
      */
-    public function user(): ?object
+    public function user(): ?Authenticatable
     {
+        // 1. Zaten cache'lenmişse döndür
         if ($this->user) {
             return $this->user;
         }
 
-        // AuthMiddleware'in kaydettiği 'auth.user'
-        if ($this->app->has('auth.user')) {
-            $this->user = $this->app->resolve('auth.user');
-            return $this->user;
+        // 2. JWT payload'ından user ID al
+        $userId = null;
+
+        // AuthMiddleware'in set ettiği payload'ı kontrol et
+        if ($this->app->has('auth.payload')) {
+            $payload = $this->app->resolve('auth.payload');
+            $userId = $payload->sub ?? null;
         }
 
-        return null;
+        if (!$userId) {
+            return null;
+        }
+
+        // 3. User modelini DB'den çek
+        $this->user = $this->provider->retrieveById($userId);
+
+        return $this->user;
     }
-    
+
     /**
-     * Giriş yapmış kullanıcının ID'sini alır.
+     * ✅ FIX: Giriş yapmış kullanıcının ID'sini alır (nullsafe).
      */
     public function id(): mixed
     {
-        return $this->user()->sub ?? null; // 'sub' JWT standardıdır
+        $user = $this->user();
+        return $user?->getAuthId();
     }
 
     /**
@@ -86,9 +87,9 @@ class AuthManager
     {
         return $this->user() !== null;
     }
-    
+
     /**
-     * JWT yöneticisine doğrudan erişim sağlar (gerekirse).
+     * JWT yöneticisine doğrudan erişim sağlar.
      */
     public function jwt(): JwtManager
     {

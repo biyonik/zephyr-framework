@@ -8,16 +8,8 @@ use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
 use Zephyr\Auth\Contracts\Authenticatable;
 use Zephyr\Support\Config;
+use Zephyr\Cache\CacheInterface;
 
-/**
- * JWT Manager - ENHANCED (Refresh Token Support)
- *
- * Access token + Refresh token ile güvenli auth sistemi.
- *
- * @author  Ahmet ALTUN
- * @email   ahmet.altun60@gmail.com
- * @github  https://github.com/biyonik
- */
 class JwtManager
 {
     protected string $secret;
@@ -25,14 +17,16 @@ class JwtManager
     protected int $expiry;
     protected int $refreshExpiry;
     protected string $issuer;
+    protected CacheInterface $cache; // ✅ Cache injection
 
-    public function __construct()
+    public function __construct(CacheInterface $cache)
     {
         $this->secret = Config::get('auth.jwt.secret');
         $this->algo = Config::get('auth.jwt.algo');
         $this->expiry = Config::get('auth.jwt.expiry');
         $this->refreshExpiry = Config::get('auth.jwt.refresh_expiry');
         $this->issuer = Config::get('auth.jwt.issuer');
+        $this->cache = $cache; // ✅ Cache bağımlılığı
 
         if (empty($this->secret)) {
             throw new \RuntimeException('JWT_SECRET .env dosyasında tanımlanmamış.');
@@ -40,11 +34,7 @@ class JwtManager
     }
 
     /**
-     * Verilen kullanıcı için yeni bir Access Token oluşturur.
-     *
-     * @param Authenticatable $user
-     * @param array $customClaims Ekstra claim'ler (opsiyonel)
-     * @return string
+     * Access Token oluşturur.
      */
     public function createToken(Authenticatable $user, array $customClaims = []): string
     {
@@ -55,20 +45,14 @@ class JwtManager
             'iat' => $time,
             'exp' => $time + $this->expiry,
             'sub' => $user->getAuthId(),
-            'type' => 'access', // ✅ Token tipini belirt
+            'type' => 'access',
         ], $customClaims);
 
         return JWT::encode($payload, $this->secret, $this->algo);
     }
 
     /**
-     * Verilen kullanıcı için yeni bir Refresh Token oluşturur.
-     *
-     * Refresh token daha uzun ömürlüdür ve sadece yeni access token
-     * almak için kullanılır.
-     *
-     * @param Authenticatable $user
-     * @return string
+     * Refresh Token oluşturur.
      */
     public function createRefreshToken(Authenticatable $user): string
     {
@@ -79,7 +63,7 @@ class JwtManager
             'iat' => $time,
             'exp' => $time + $this->refreshExpiry,
             'sub' => $user->getAuthId(),
-            'type' => 'refresh', // ✅ Refresh token olduğunu belirt
+            'type' => 'refresh',
             'jti' => bin2hex(random_bytes(16)), // ✅ Unique token ID
         ];
 
@@ -87,11 +71,7 @@ class JwtManager
     }
 
     /**
-     * Bir token'ı doğrular ve payload'ı döndürür.
-     *
-     * @param string $token
-     * @param string|null $expectedType 'access' veya 'refresh' (opsiyonel)
-     * @return object|null
+     * Token'ı doğrular ve payload döndürür.
      */
     public function decodeToken(string $token, ?string $expectedType = null): ?object
     {
@@ -100,28 +80,30 @@ class JwtManager
 
             // Token tipini kontrol et
             if ($expectedType !== null && isset($payload->type) && $payload->type !== $expectedType) {
-                return null; // Yanlış token tipi
+                return null;
+            }
+
+            // ✅ Blacklist kontrolü (refresh token için)
+            if (isset($payload->jti) && $this->isBlacklisted($payload->jti)) {
+                return null;
             }
 
             return $payload;
 
         } catch (\Firebase\JWT\ExpiredException $e) {
-            // Token süresi dolmuş
             return null;
         } catch (\Exception $e) {
-            // Diğer hatalar (invalid signature, malformed token, etc.)
             return null;
         }
     }
 
     /**
-     * Bir refresh token ile yeni access token üretir.
+     * ✅ FIX: Refresh token ile yeni access token + yeni refresh token üretir.
+     * Eski refresh token'ı blacklist'e ekler (rotation).
      *
-     * @param string $refreshToken
-     * @param Authenticatable $user
-     * @return string|null Yeni access token veya null (başarısız)
+     * @return array{access_token: string, refresh_token: string}|null
      */
-    public function refreshAccessToken(string $refreshToken, Authenticatable $user): ?string
+    public function refreshAccessToken(string $refreshToken, Authenticatable $user): ?array
     {
         // 1. Refresh token'ı doğrula
         $payload = $this->decodeToken($refreshToken, 'refresh');
@@ -135,12 +117,36 @@ class JwtManager
             return null; // Güvenlik: Token başka kullanıcıya ait!
         }
 
-        // 3. Yeni access token üret
-        return $this->createToken($user);
+        // 3. ✅ Eski refresh token'ı blacklist'e ekle
+        $this->blacklistRefreshToken($payload->jti, $payload->exp);
+
+        // 4. ✅ Yeni token pair üret
+        return [
+            'access_token' => $this->createToken($user),
+            'refresh_token' => $this->createRefreshToken($user), // Yeni refresh token
+        ];
     }
 
     /**
-     * Token'ın geçerli olup olmadığını kontrol eder (bool).
+     * ✅ Refresh token'ı blacklist'e ekler.
+     */
+    protected function blacklistRefreshToken(string $jti, int $expiry): void
+    {
+        // Token expire olana kadar blacklist'te tut
+        $ttl = max(1, $expiry - time());
+        $this->cache->set("refresh_token_blacklist:{$jti}", '1', $ttl);
+    }
+
+    /**
+     * ✅ Token blacklist'te mi kontrol eder.
+     */
+    protected function isBlacklisted(string $jti): bool
+    {
+        return $this->cache->has("refresh_token_blacklist:{$jti}");
+    }
+
+    /**
+     * Token'ın geçerli olup olmadığını kontrol eder.
      */
     public function isValid(string $token, ?string $expectedType = null): bool
     {

@@ -358,16 +358,55 @@ class Route
     public function where(string|array $name, ?string $expression = null): self
     {
         if (is_array($name)) {
-            $this->wheres = array_merge($this->wheres, $name);
+            foreach ($name as $key => $value) {
+                $this->validateAndSetConstraint($key, $value);
+            }
         } else {
-            $this->wheres[$name] = $expression;
+            $this->validateAndSetConstraint($name, $expression);
         }
-        
-        // ✅ Recompile route with new constraints
+
         $this->compile();
-        
         return $this;
     }
+
+    protected function validateAndSetConstraint(string $paramName, string $pattern): void
+    {
+        // 1. Regex geçerliliğini kontrol et
+        if (@preg_match("/{$pattern}/", '') === false) {
+            throw new \InvalidArgumentException(
+                "Invalid regex pattern for parameter [{$paramName}]: {$pattern}"
+            );
+        }
+
+        // 2. Tehlikeli pattern'leri engelle (ReDoS protection)
+        if ($this->isDangerousPattern($pattern)) {
+            throw new \InvalidArgumentException(
+                "Potentially dangerous regex pattern for parameter [{$paramName}]: {$pattern}"
+            );
+        }
+
+        $this->wheres[$paramName] = $pattern;
+    }
+
+    protected function isDangerousPattern(string $pattern): bool
+    {
+        // Catastrophic backtracking riski olan pattern'ler
+        $dangerousPatterns = [
+            '/\(\?R\)/',           // Recursive pattern
+            '/\(\?\d+\)/',         // Recursive subpattern
+            '/\(\?P>/',            // Named recursion
+            '/\(\?\#.*?\)/',       // Comment (genelde harmless ama güvenlik için)
+        ];
+
+        foreach ($dangerousPatterns as $dangerous) {
+            if (preg_match($dangerous, $pattern)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
 
     /**
      * Add numeric constraint (shorthand for where with [0-9]+)

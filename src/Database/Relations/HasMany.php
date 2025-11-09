@@ -147,9 +147,12 @@ class HasMany extends Relation implements ReturnsMany
             $key = $model->getAttribute($this->localKey);
 
             if (isset($dictionary[$key])) {
-                $model->setRelation($relation, $dictionary[$key]);
+                // ✅ Collection döndür
+                $collection = $this->query->getModel()?->newCollection($dictionary[$key]);
+                $model->setRelation($relation, $collection);
             } else {
-                $model->setRelation($relation, []);
+                // ✅ Boş Collection döndür
+                $model->setRelation($relation, $this->query->getModel()?->newCollection([]));
             }
         }
 

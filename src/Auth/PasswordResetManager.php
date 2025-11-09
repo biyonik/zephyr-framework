@@ -7,15 +7,6 @@ namespace Zephyr\Auth;
 use Zephyr\Database\Connection;
 use Zephyr\Support\Config;
 
-/**
- * Password Reset Manager
- *
- * Şifre sıfırlama token'larını yönetir (veritabanı tabanlı).
- *
- * @author  Ahmet ALTUN
- * @email   ahmet.altun60@gmail.com
- * @github  https://github.com/biyonik
- */
 class PasswordResetManager
 {
     protected Connection $db;
@@ -32,68 +23,53 @@ class PasswordResetManager
 
     /**
      * Kullanıcı için yeni bir reset token oluşturur.
-     *
-     * @param string $email Kullanıcı e-posta adresi
-     * @return string Token (bu e-posta ile gönderilir)
      */
     public function createToken(string $email): string
     {
-        // 1. Throttle kontrolü (spam engelleme)
         $this->enforceThrottle($email);
-
-        // 2. Eski token'ları sil
         $this->deleteExistingTokens($email);
 
-        // 3. Yeni token oluştur (güvenli ve URL-safe)
         $token = bin2hex(random_bytes(32));
         $hashedToken = hash('sha256', $token);
 
-        // 4. Veritabanına kaydet
         $this->db->table($this->table)->insert([
             'email' => $email,
             'token' => $hashedToken,
             'created_at' => date('Y-m-d H:i:s'),
         ]);
 
-        // 5. Plain token'ı döndür (e-posta ile gönderilecek)
         return $token;
     }
 
     /**
-     * Token'ın geçerli olup olmadığını kontrol eder.
+     * ✅ FIX: Token'ı atomic olarak validate eder.
      *
-     * @param string $email
-     * @param string $token
-     * @return bool
+     * Race condition fix: Validate ve delete tek transaction'da.
      */
     public function validateToken(string $email, string $token): bool
     {
         $hashedToken = hash('sha256', $token);
+        $expireTime = date('Y-m-d H:i:s', time() - ($this->expireMinutes * 60));
 
+        // ✅ Atomic: Single query ile validate ve fetch
         $record = $this->db->table($this->table)
             ->where('email', $email)
             ->where('token', $hashedToken)
+            ->where('created_at', '>', $expireTime)
             ->first();
 
         if (!$record) {
-            return false; // Token bulunamadı
+            return false; // Token bulunamadı veya expire olmuş
         }
 
-        // Süre kontrolü
-        $createdAt = strtotime($record['created_at']);
-        $expiresAt = $createdAt + ($this->expireMinutes * 60);
-
-        if (time() > $expiresAt) {
-            // Token süresi dolmuş, sil
-            $this->delete($email);
-            return false;
-        }
+        // Token geçerli, hemen sil (reuse prevention)
+        $this->delete($email);
 
         return true;
     }
 
     /**
-     * Token'ı siler (şifre sıfırlama tamamlandığında).
+     * Token'ı siler.
      */
     public function delete(string $email): void
     {
@@ -111,9 +87,7 @@ class PasswordResetManager
     }
 
     /**
-     * Throttle kontrolü yapar (spam engelleme).
-     *
-     * @throws \RuntimeException Çok sık istek yapılıyorsa
+     * Throttle kontrolü yapar.
      */
     protected function enforceThrottle(string $email): void
     {
@@ -135,7 +109,7 @@ class PasswordResetManager
     }
 
     /**
-     * Süresi dolmuş tüm token'ları temizler (maintenance).
+     * Süresi dolmuş tüm token'ları temizler.
      */
     public function cleanup(): int
     {

@@ -16,9 +16,9 @@ class Blueprint
     }
 
     /**
-     * Otomatik artan 'id' (BIGINT UNSIGNED) sütunu ekler.
+     * Otomatik artan 'id' sütunu ekler.
      */
-    public function id(string $column = 'id'): void
+    public function id(string $column = 'id'): ColumnDefinition
     {
         $this->columns[] = [
             'type' => 'bigInteger',
@@ -26,52 +26,57 @@ class Blueprint
             'autoIncrement' => true,
             'unsigned' => true,
             'primary' => true,
+            'nullable' => false,
         ];
+
+        return $this->lastColumn();
     }
 
     /**
-     * Bir VARCHAR sütunu ekler.
+     * VARCHAR sütunu ekler.
      */
-    public function string(string $name, int $length = 255): object
+    public function string(string $name, int $length = 255): ColumnDefinition
     {
-        $this->columns[] = $column = [
+        $this->columns[] = [
             'type' => 'string',
             'name' => $name,
             'length' => $length,
             'nullable' => false,
         ];
-        // Zincirleme (chaining) için son sütunu döndürelim
+
         return $this->lastColumn();
     }
 
     /**
-     * Bir INTEGER sütunu ekler.
+     * INTEGER sütunu ekler.
      */
-    public function integer(string $name): object
+    public function integer(string $name): ColumnDefinition
     {
         $this->columns[] = [
             'type' => 'integer',
             'name' => $name,
             'nullable' => false,
         ];
+
         return $this->lastColumn();
     }
 
     /**
-     * Bir TEXT sütunu ekler.
+     * TEXT sütunu ekler.
      */
-    public function text(string $name): object
+    public function text(string $name): ColumnDefinition
     {
         $this->columns[] = [
             'type' => 'text',
             'name' => $name,
             'nullable' => false,
         ];
+
         return $this->lastColumn();
     }
 
     /**
-     * 'created_at' ve 'updated_at' TIMESTAMP sütunlarını ekler.
+     * Timestamps ekler.
      */
     public function timestamps(): void
     {
@@ -81,41 +86,13 @@ class Blueprint
             'nullable' => true,
             'default' => 'CURRENT_TIMESTAMP',
         ];
+
         $this->columns[] = [
             'type' => 'timestamp',
             'name' => 'updated_at',
             'nullable' => true,
-            'default' => 'CURRENT_TIMESTAMP', // Veya 'ON UPDATE CURRENT_TIMESTAMP'
+            'default' => 'CURRENT_TIMESTAMP',
         ];
-    }
-
-    // --- Zincirleme Metotlar (Modifiers) ---
-
-    /**
-     * Sütunun 'NULL' değer kabul etmesine izin verir.
-     */
-    public function nullable(): object
-    {
-        $this->lastColumn()->nullable = true;
-        return $this->lastColumn();
-    }
-
-    /**
-     * Sütun için varsayılan bir değer atar.
-     */
-    public function default(mixed $value): object
-    {
-        $this->lastColumn()->default = $value;
-        return $this->lastColumn();
-    }
-
-    /**
-     * Sütuna 'UNIQUE' kısıtlaması ekler.
-     */
-    public function unique(): object
-    {
-        $this->lastColumn()->unique = true;
-        return $this->lastColumn();
     }
 
     /**
@@ -134,27 +111,20 @@ class Blueprint
         $this->commands[] = ['type' => 'dropIfExists'];
     }
 
-    // --- Dahili Yardımcılar ---
-
     /**
-     * Zincirleme için son eklenen sütun nesnesini döndürür.
+     * ✅ FIX: Son sütun için ColumnDefinition wrapper döndürür.
      */
-    protected function lastColumn(): object
+    protected function lastColumn(): ColumnDefinition
     {
-        return (object) $this->columns[count($this->columns) - 1];
+        $lastIndex = count($this->columns) - 1;
+        return new ColumnDefinition($this->columns[$lastIndex]);
     }
 
-    /**
-     * Tanımlanan sütunları alır.
-     */
     public function getColumns(): array
     {
         return $this->columns;
     }
 
-    /**
-     * Tanımlanan komutları (drop vb.) alır.
-     */
     public function getCommands(): array
     {
         return $this->commands;
