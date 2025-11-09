@@ -12,18 +12,22 @@ use Zephyr\Support\Collection;
 /**
  * Has Many Relation
  *
- * One-to-many relationship (e.g., User has many Posts).
- * Implements ReturnsMany interface - always returns an array of models.
+ * One-to-many ilişkisini temsil eder (Bir kullanıcının birden fazla gönderisi var).
+ * ReturnsMany interface'ini implement eder - her zaman Collection döndürür.
  *
- * Usage:
+ * Kullanım:
  * class User extends Model {
  *     public function posts() {
  *         return $this->hasMany(Post::class);
  *     }
  * }
  *
- * $user->posts; // Get all posts (array)
+ * Çağırma:
+ * $user->posts; // Collection<Post>
  * $user->posts()->where('published', true)->get();
+ *
+ * Eager Loading:
+ * User::with('posts')->get();
  *
  * @author  Ahmet ALTUN
  * @email   ahmet.altun60@gmail.com
@@ -32,22 +36,22 @@ use Zephyr\Support\Collection;
 class HasMany extends Relation implements ReturnsMany
 {
     /**
-     * Foreign key on related model
+     * İlişkili modeldeki foreign key (örn: 'user_id')
      */
     protected string $foreignKey;
 
     /**
-     * Local key on parent model
+     * Üst modeldeki local key (örn: 'id')
      */
     protected string $localKey;
 
     /**
      * Constructor
      *
-     * @param Builder $query Related model query
-     * @param Model $parent Parent model
-     * @param string $foreignKey Foreign key (e.g., 'user_id')
-     * @param string $localKey Local key (e.g., 'id')
+     * @param Builder $query İlişkili model query'si
+     * @param Model $parent Üst model
+     * @param string $foreignKey Foreign key (örn: 'user_id')
+     * @param string $localKey Local key (örn: 'id')
      */
     public function __construct(
         Builder $query,
@@ -64,69 +68,71 @@ class HasMany extends Relation implements ReturnsMany
     }
 
     /**
-     * Add constraints to query
+     * Query'ye kısıtları ekler (tek model için)
      *
-     * Implementation of RelationContract interface.
-     * Adds WHERE clause for single parent model.
+     * RelationContract interface implementasyonu.
+     * Lazy loading için WHERE clause ekler.
      *
      * @return void
      *
      * @example
-     * $user->posts() adds: WHERE posts.user_id = 1
+     * $user->posts() için: WHERE posts.user_id = 1
      */
     public function addConstraints(): void
     {
-        if (!is_null($this->parent->getAttribute($this->localKey))) {
+        $localValue = $this->parent->getAttribute($this->localKey);
+
+        if (!is_null($localValue)) {
             $this->query->where(
                 $this->foreignKey,
                 '=',
-                $this->parent->getAttribute($this->localKey)
+                $localValue
             );
         }
     }
 
     /**
-     * Add eager loading constraints
+     * Eager loading için kısıtları ekler (çoklu model için)
      *
-     * Implementation of RelationContract interface.
-     * Adds WHERE IN clause for multiple parent models.
+     * RelationContract interface implementasyonu.
+     * WHERE IN clause ile çoklu üst model için query oluşturur.
      *
-     * @param array<Model> $models Parent models
+     * @param array<Model> $models Üst modeller
      * @return void
      *
      * @example
-     * User::with('posts') adds: WHERE posts.user_id IN (1, 2, 3, ...)
+     * User::with('posts') için: WHERE posts.user_id IN (1, 2, 3, ...)
      */
     public function addEagerConstraints(array $models): void
     {
-        // Get all local key values from parent models
+        // Tüm üst modellerden local key değerlerini topla
         $keys = array_map(function ($model) {
             return $model->getAttribute($this->localKey);
         }, $models);
 
-        // Remove nulls and duplicates
+        // Null ve duplicate'leri temizle
         $keys = array_unique(array_filter($keys));
 
         if (empty($keys)) {
-            // No keys, make query return nothing
+            // Key yoksa hiçbir şey döndürme
             $this->query->where($this->foreignKey, '=', null);
             return;
         }
 
-        // Add WHERE IN constraint
+        // WHERE IN kısıtı ekle
         $this->query->whereIn($this->foreignKey, $keys);
     }
 
     /**
-     * Match eager loaded results to parent models
+     * Eager loading sonuçlarını üst modellerle eşleştirir
      *
-     * Implementation of RelationContract interface.
-     * Groups results by foreign key and assigns arrays to parent models.
+     * RelationContract interface implementasyonu.
+     * Sonuçları foreign key'e göre gruplar ve her üst model'e atar.
      *
-     * @param array<Model> $models Parent models
-     * @param array<Model> $results Related models
-     * @param string $relation Relationship name
-     * @return array<Model> Parent models with loaded relationships
+     * @param array<Model> $models Üst modeller
+     * @param array<Model> $results İlişkili modeller
+     * @param string $relation İlişki adı
+     * @return array<Model> İlişkiler yüklenmiş üst modeller
      *
      * @example
      * Input:
@@ -134,24 +140,24 @@ class HasMany extends Relation implements ReturnsMany
      *   $results = [Post(user_id=1), Post(user_id=1), Post(user_id=2)]
      *
      * Output:
-     *   User(id=1)->posts = [Post, Post]
-     *   User(id=2)->posts = [Post]
+     *   User(id=1)->posts = Collection[Post, Post]
+     *   User(id=2)->posts = Collection[Post]
      */
     public function match(array $models, array $results, string $relation): array
     {
-        // Group results by foreign key
+        // Sonuçları foreign key'e göre grupla
         $dictionary = $this->buildDictionary($results);
 
-        // Match results to each parent model
+        // Her üst model'e sonuçları ata
         foreach ($models as $model) {
             $key = $model->getAttribute($this->localKey);
 
             if (isset($dictionary[$key])) {
-                // ✅ Collection döndür
+                // Collection döndür
                 $collection = $this->query->getModel()?->newCollection($dictionary[$key]);
                 $model->setRelation($relation, $collection);
             } else {
-                // ✅ Boş Collection döndür
+                // Boş Collection döndür
                 $model->setRelation($relation, $this->query->getModel()?->newCollection([]));
             }
         }
@@ -160,11 +166,11 @@ class HasMany extends Relation implements ReturnsMany
     }
 
     /**
-     * Build dictionary of results keyed by foreign key
+     * Sonuçları foreign key'e göre dictionary oluşturur
      *
-     * Groups models by their foreign key value for efficient matching.
+     * Verimli eşleştirme için lookup dictionary.
      *
-     * @param array<Model> $results Related models
+     * @param array<Model> $results İlişkili modeller
      * @return array<int|string, array<Model>> Dictionary: foreign_key => [models]
      *
      * @example
@@ -192,9 +198,15 @@ class HasMany extends Relation implements ReturnsMany
     }
 
     /**
-     * Get results for relationship
+     * İlişki sonuçlarını döndürür
      *
-     * @return Collection Array of related models
+     * ReturnsMany interface implementasyonu.
+     *
+     * @return Collection İlişkili modeller
+     *
+     * @example
+     * $posts = $user->posts()->getResults();
+     * // Returns: Collection<Post>
      */
     public function getResults(): Collection
     {
@@ -202,44 +214,44 @@ class HasMany extends Relation implements ReturnsMany
     }
 
     /**
-     * Create a new related model
+     * Yeni ilişkili model oluşturur ve kaydeder
      *
-     * Creates and saves a new model with the foreign key automatically set.
+     * Foreign key otomatik set edilir.
      *
-     * @param array $attributes Model attributes
-     * @return Model Created model instance
+     * @param array $attributes Model attribute'ları
+     * @return Model Oluşturulan model
      *
      * @example
      * $post = $user->posts()->create([
-     *     'title' => 'My Post',
-     *     'content' => 'Lorem ipsum...'
+     *     'title' => 'Yeni Gönderi',
+     *     'content' => 'İçerik...'
      * ]);
-     * // Automatically sets: $post->user_id = $user->id
+     * // Otomatik: $post->user_id = $user->id
      */
     public function create(array $attributes): Model
     {
-        // Add foreign key to attributes
+        // Foreign key'i ekle
         $attributes[$this->foreignKey] = $this->parent->getAttribute($this->localKey);
 
         return $this->query->create($attributes);
     }
 
     /**
-     * Save a related model
+     * İlişkili model'i kaydeder
      *
-     * Sets the foreign key and saves the model.
+     * Foreign key set edilir ve model kaydedilir.
      *
-     * @param Model $model Model to save
-     * @return bool Success status
+     * @param Model $model Kaydedilecek model
+     * @return bool Başarı durumu
      *
      * @example
-     * $post = new Post(['title' => 'My Post']);
+     * $post = new Post(['title' => 'Başlık']);
      * $user->posts()->save($post);
-     * // Sets: $post->user_id = $user->id and saves
+     * // Sets: $post->user_id = $user->id ve kaydeder
      */
     public function save(Model $model): bool
     {
-        // Set foreign key
+        // Foreign key'i set et
         $model->setAttribute(
             $this->foreignKey,
             $this->parent->getAttribute($this->localKey)
@@ -249,10 +261,10 @@ class HasMany extends Relation implements ReturnsMany
     }
 
     /**
-     * Save multiple related models
+     * Çoklu ilişkili model'i kaydeder
      *
-     * @param array<Model> $models Models to save
-     * @return bool Success status
+     * @param array<Model> $models Kaydedilecek modeller
+     * @return bool Başarı durumu
      *
      * @example
      * $user->posts()->saveMany([

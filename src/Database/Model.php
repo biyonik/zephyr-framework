@@ -15,13 +15,18 @@ use Zephyr\Support\Collection;
 /**
  * Active Record Base Model
  *
- * Provides ORM functionality with:
- * - Mass assignment protection
- * - Attribute casting
- * - Dirty tracking
- * - Automatic timestamps
- * - Relationships
- * - Query builder integration
+ * Tüm model sınıflarının miras alacağı temel sınıf.
+ * Active Record pattern implementasyonu.
+ *
+ * Özellikler:
+ * - Mass assignment koruması (fillable/guarded)
+ * - Attribute casting (int, bool, json, date vs.)
+ * - Dirty tracking (değişiklik takibi)
+ * - Otomatik timestamps (created_at, updated_at)
+ * - İlişkiler (hasMany, belongsTo, hasOne, belongsToMany)
+ * - Query builder entegrasyonu
+ * - Global scopes
+ * - Soft deletes (trait ile)
  *
  * @author  Ahmet ALTUN
  * @email   ahmet.altun60@gmail.com
@@ -34,63 +39,64 @@ abstract class Model
     use HasRelationships;
 
     /**
-     * Database connection instance
+     * Veritabanı bağlantısı
      */
     protected ?Connection $connection = null;
 
     /**
-     * Table name (override in child classes)
+     * Tablo adı (alt sınıflarda override edilebilir)
+     * Belirtilmezse class adından otomatik türetilir
      */
     protected string $table = '';
 
     /**
-     * Primary key column name
+     * Primary key sütun adı
      */
     protected string $primaryKey = 'id';
 
     /**
-     * Primary key type
+     * Primary key tipi
      */
     protected string $keyType = 'int';
 
     /**
-     * Whether primary key is auto-incrementing
+     * Primary key auto-increment mi?
      */
     public bool $incrementing = true;
 
     /**
-     * Indicates if model exists in database
+     * Model veritabanında var mı?
      */
     public bool $exists = false;
 
     /**
-     * Indicates if model was recently created
+     * Model yeni mi oluşturuldu?
      */
     public bool $wasRecentlyCreated = false;
 
     /**
-     * Mass assignable attributes (whitelist)
+     * Mass assignment whitelist (izin verilen alanlar)
      *
      * @example ['name', 'email', 'password']
      */
     protected array $fillable = [];
 
     /**
-     * Guarded attributes (blacklist)
+     * Mass assignment blacklist (yasak alanlar)
      *
      * @example ['id', 'is_admin', 'role']
      */
     protected array $guarded = ['*'];
 
     /**
-     * Attributes to hide when converting to array/JSON
+     * Array/JSON'a çevirirken gizlenecek alanlar
      *
      * @example ['password', 'remember_token']
      */
     protected array $hidden = [];
 
     /**
-     * Attributes to always include when converting to array/JSON
+     * Array/JSON'a çevirirken her zaman gösterilecek alanlar
      */
     protected array $visible = [];
 
@@ -102,24 +108,35 @@ abstract class Model
     protected array $casts = [];
 
     /**
-     * Attributes that should be treated as dates
+     * Date olarak işlenecek alanlar
      */
     protected array $dates = [];
 
     /**
-     * Default attribute values
+     * Varsayılan attribute değerleri
      */
     protected array $attributes = [];
 
     /**
-     * Original attribute values from database
+     * Veritabanından gelen orjinal değerler
      */
     protected array $original = [];
 
     /**
-     * Model constructor
+     * Model global scope'ları
+     * @var array<string, \Zephyr\Database\ScopeInterface>
+     */
+    protected static array $globalScopes = [];
+
+    /**
+     * Model boot edildi mi?
+     */
+    protected static array $booted = [];
+
+    /**
+     * Constructor
      *
-     * @param array $attributes Initial attributes
+     * @param array $attributes Başlangıç attribute'ları
      */
     public function __construct(array $attributes = [])
     {
@@ -129,13 +146,25 @@ abstract class Model
     }
 
     /**
-     * Boot model (called once per model class)
+     * Model henüz boot edilmediyse boot eder
+     *
+     * Her model sınıfı için bir kez çalışır.
      */
     protected function bootIfNotBooted(): void
     {
-        $this->bootTraits();
+        $class = static::class;
+
+        if (!isset(static::$booted[$class])) {
+            static::$booted[$class] = true;
+            $this->bootTraits();
+        }
     }
 
+    /**
+     * Trait boot metotlarını çalıştırır
+     *
+     * Örnek: HasSoftDeletes trait'i kullanılıyorsa bootHasSoftDeletes() çağrılır
+     */
     protected function bootTraits(): void
     {
         $class = static::class;
@@ -150,7 +179,41 @@ abstract class Model
     }
 
     /**
-     * Get table name
+     * Global scope ekler
+     *
+     * @param \Zephyr\Database\ScopeInterface $scope
+     */
+    public static function addGlobalScope(\Zephyr\Database\ScopeInterface $scope): void
+    {
+        $class = static::class;
+        static::$globalScopes[$class][get_class($scope)] = $scope;
+    }
+
+    /**
+     * Global scope'ları query builder'a uygular
+     *
+     * @param Builder $builder
+     * @return Builder
+     */
+    protected function applyGlobalScopes(Builder $builder): Builder
+    {
+        $class = static::class;
+
+        if (!isset(static::$globalScopes[$class])) {
+            return $builder;
+        }
+
+        foreach (static::$globalScopes[$class] as $scope) {
+            $scope->apply($builder, $this);
+        }
+
+        return $builder;
+    }
+
+    /**
+     * Tablo adını döndürür
+     *
+     * @return string
      */
     public function getTable(): string
     {
@@ -158,13 +221,15 @@ abstract class Model
             return $this->table;
         }
 
-        // Generate from class name: User -> users
+        // Class adından otomatik türet: User -> users
         $className = class_basename(static::class);
         return strtolower($className) . 's';
     }
 
     /**
-     * Get primary key name
+     * Primary key sütun adını döndürür
+     *
+     * @return string
      */
     public function getKeyName(): string
     {
@@ -172,7 +237,9 @@ abstract class Model
     }
 
     /**
-     * Get primary key value
+     * Primary key değerini döndürür
+     *
+     * @return mixed
      */
     public function getKey(): mixed
     {
@@ -180,7 +247,10 @@ abstract class Model
     }
 
     /**
-     * Set primary key value
+     * Primary key değerini set eder
+     *
+     * @param mixed $value
+     * @return self
      */
     public function setKey(mixed $value): self
     {
@@ -189,7 +259,9 @@ abstract class Model
     }
 
     /**
-     * Get database connection
+     * Database bağlantısını döndürür
+     *
+     * @return Connection
      */
     public function getConnection(): Connection
     {
@@ -201,7 +273,10 @@ abstract class Model
     }
 
     /**
-     * Set database connection
+     * Database bağlantısını set eder
+     *
+     * @param Connection $connection
+     * @return self
      */
     public function setConnection(Connection $connection): self
     {
@@ -210,9 +285,25 @@ abstract class Model
     }
 
     /**
-     * Create a new query builder instance
+     * Yeni query builder oluşturur (global scope'larla)
+     *
+     * @return Builder
      */
     public function newQuery(): Builder
+    {
+        $builder = (new Builder($this->getConnection()))
+            ->setModel($this)
+            ->from($this->getTable());
+
+        return $this->applyGlobalScopes($builder);
+    }
+
+    /**
+     * Yeni query builder oluşturur (global scope'suz)
+     *
+     * @return Builder
+     */
+    public function newQueryWithoutScopes(): Builder
     {
         return (new Builder($this->getConnection()))
             ->setModel($this)
@@ -220,11 +311,11 @@ abstract class Model
     }
 
     /**
-     * YENİ: Model dizisini bir Koleksiyona dönüştürür.
-     * Bu, alt sınıflar (örn: EloquentCollection) tarafından
-     * override edilebilir.
+     * Model array'ini Collection'a çevirir
      *
-     * @param array<Model> $models
+     * Alt sınıflar override edebilir (örn: EloquentCollection)
+     *
+     * @param array $models
      * @return Collection
      */
     public function newCollection(array $models): Collection
@@ -233,9 +324,9 @@ abstract class Model
     }
 
     /**
-     * Fill model with attributes (mass assignment)
+     * Model'i attribute'larla doldurur (mass assignment)
      *
-     * @param array $attributes Attributes to fill
+     * @param array $attributes
      * @return self
      * @throws MassAssignmentException
      */
@@ -249,7 +340,7 @@ abstract class Model
     }
 
     /**
-     * Get fillable attributes from array
+     * Mass assignment için fillable attribute'ları döndürür
      *
      * @param array $attributes
      * @return array
@@ -257,14 +348,12 @@ abstract class Model
      */
     protected function fillableFromArray(array $attributes): array
     {
-        // Check if totally guarded
+        // Tamamen guarded mı kontrol et
         if (count($this->fillable) === 0 && $this->guarded === ['*']) {
-            throw new MassAssignmentException(
-                'Add fillable property to enable mass assignment on ' . static::class
-            );
+            throw MassAssignmentException::fillableNotSet(static::class);
         }
 
-        // Whitelist mode (fillable)
+        // Whitelist modu (fillable)
         if (count($this->fillable) > 0) {
             return array_intersect_key(
                 $attributes,
@@ -272,7 +361,7 @@ abstract class Model
             );
         }
 
-        // Blacklist mode (guarded)
+        // Blacklist modu (guarded)
         return array_diff_key(
             $attributes,
             array_flip($this->guarded)
@@ -280,26 +369,32 @@ abstract class Model
     }
 
     /**
-     * Check if attribute is fillable
+     * Attribute fillable mı kontrol eder
+     *
+     * @param string $key
+     * @return bool
      */
     public function isFillable(string $key): bool
     {
-        // Fillable whitelist
+        // Fillable whitelist'te mi?
         if (in_array($key, $this->fillable, true)) {
             return true;
         }
 
-        // Guarded blacklist
+        // Guarded blacklist'te mi?
         if ($this->isGuarded($key)) {
             return false;
         }
 
-        // Default behavior
+        // Default: fillable boşsa ve guarded değilse OK
         return empty($this->fillable) && !$this->isGuarded($key);
     }
 
     /**
-     * Check if attribute is guarded
+     * Attribute guarded mı kontrol eder
+     *
+     * @param string $key
+     * @return bool
      */
     public function isGuarded(string $key): bool
     {
@@ -307,23 +402,22 @@ abstract class Model
     }
 
     /**
-     * Sync original attributes with current
+     * Orjinal attribute'ları senkronize eder
+     *
+     * @return self
      */
     public function syncOriginal(): self
     {
-        $this->original = $this->attributes; //
-        
-        // YENİ: (Rapor #1 Çözümü)
-        // Modelin durumu "orijinal" haline döndüğünde,
-        // (örn: save() veya refresh() sonrası)
-        // hesaplanmış özellik önbelleğini temizle.
+        $this->original = $this->attributes;
         $this->clearAttributeCache();
-        
         return $this;
     }
 
     /**
-     * Sync single original attribute
+     * Tek bir attribute'u senkronize eder
+     *
+     * @param string $key
+     * @return self
      */
     public function syncOriginalAttribute(string $key): self
     {
@@ -332,9 +426,9 @@ abstract class Model
     }
 
     /**
-     * Check if model or specific attributes have been modified
+     * Model veya belirli attribute'lar değişti mi?
      *
-     * @param array|string|null $attributes Attributes to check
+     * @param array|string|null $attributes
      * @return bool
      */
     public function isDirty(array|string|null $attributes = null): bool
@@ -346,7 +440,10 @@ abstract class Model
     }
 
     /**
-     * Check if model or attributes are clean (not modified)
+     * Model veya attribute'lar temiz mi (değişmemiş mi)?
+     *
+     * @param array|string|null $attributes
+     * @return bool
      */
     public function isClean(array|string|null $attributes = null): bool
     {
@@ -354,7 +451,9 @@ abstract class Model
     }
 
     /**
-     * Get dirty attributes (modified attributes)
+     * Değişen attribute'ları döndürür
+     *
+     * @return array
      */
     public function getDirty(): array
     {
@@ -372,7 +471,9 @@ abstract class Model
     }
 
     /**
-     * Get changed attributes (after last save)
+     * Son save'den sonraki değişiklikleri döndürür
+     *
+     * @return array
      */
     public function getChanges(): array
     {
@@ -380,16 +481,20 @@ abstract class Model
     }
 
     /**
-     * Check if specific attributes have changes
+     * Belirli attribute'larda değişiklik var mı kontrol eder
+     *
+     * @param array $changes
+     * @param array $attributes
+     * @return bool
      */
     protected function hasChanges(array $changes, array $attributes = []): bool
     {
-        // Check all attributes
+        // Tüm attribute'ları kontrol et
         if (empty($attributes)) {
             return count($changes) > 0;
         }
 
-        // Check specific attributes
+        // Belirli attribute'ları kontrol et
         foreach ($attributes as $attribute) {
             if (array_key_exists($attribute, $changes)) {
                 return true;
@@ -400,25 +505,25 @@ abstract class Model
     }
 
     /**
-     * Save model to database
+     * Model'i veritabanına kaydeder
      *
-     * @return bool Success status
+     * @return bool Başarı durumu
      */
     public function save(): bool
     {
-        // ✅ Timestamps'i save() seviyesinde güncelle
+        // Timestamps'i güncelle
         if ($this->usesTimestamps() && ($this->isDirty() || !$this->exists)) {
             $this->updateTimestamps();
         }
 
-        // Perform INSERT or UPDATE
+        // INSERT veya UPDATE
         if ($this->exists) {
             $saved = $this->performUpdate();
         } else {
             $saved = $this->performInsert();
         }
 
-        // Sync original if saved
+        // Başarılı ise orjinal'i senkronize et
         if ($saved) {
             $this->syncOriginal();
         }
@@ -427,12 +532,12 @@ abstract class Model
     }
 
     /**
-     * Perform INSERT operation
+     * INSERT işlemi yapar
+     *
+     * @return bool
      */
     protected function performInsert(): bool
     {
-        // ✅ Timestamps zaten save()'de güncellendi
-
         $attributes = $this->getAttributesForInsert();
 
         if (empty($attributes)) {
@@ -452,18 +557,18 @@ abstract class Model
     }
 
     /**
-     * Perform UPDATE operation
+     * UPDATE işlemi yapar
+     *
+     * @return bool
      */
     protected function performUpdate(): bool
     {
-        // Check if anything changed
+        // Değişiklik var mı kontrol et
         $dirty = $this->getDirty();
 
         if (count($dirty) === 0) {
             return true;
         }
-
-        // ✅ Timestamps zaten save()'de güncellendi ve dirty'de
 
         $affected = $this->newQuery()
             ->where($this->getKeyName(), '=', $this->getKey())
@@ -473,7 +578,9 @@ abstract class Model
     }
 
     /**
-     * Get attributes for insert
+     * INSERT için attribute'ları döndürür
+     *
+     * @return array
      */
     protected function getAttributesForInsert(): array
     {
@@ -481,9 +588,11 @@ abstract class Model
     }
 
     /**
-     * Delete model from database
+     * Model'i veritabanından siler
      *
-     * @return bool Success status
+     * Soft delete trait kullanılıyorsa soft delete yapar.
+     *
+     * @return bool
      */
     public function delete(): bool
     {
@@ -491,7 +600,6 @@ abstract class Model
             return false;
         }
 
-        // Perform delete
         $deleted = $this->newQuery()
             ->where($this->getKeyName(), '=', $this->getKey())
             ->delete();
@@ -505,7 +613,9 @@ abstract class Model
     }
 
     /**
-     * Refresh model from database
+     * Model'i veritabanından yeniler (refresh)
+     *
+     * @return self
      */
     public function refresh(): self
     {
@@ -518,9 +628,7 @@ abstract class Model
             ->first();
 
         if ($fresh) {
-            $this->setRawAttributes($fresh, true);
-
-            // ✅ Relations cache'i de temizle
+            $this->setRawAttributes($fresh->getAttributes(), true);
             $this->relations = [];
         }
 
@@ -528,11 +636,14 @@ abstract class Model
     }
 
     /**
-     * Replicate model instance
+     * Model'i çoğaltır (replicate)
+     *
+     * @param array $except Hariç tutulacak alanlar
+     * @return static
      */
     public function replicate(array $except = []): static
     {
-        // ✅ Otomatik exclude: primary key + timestamps
+        // Otomatik exclude: primary key + timestamps
         $defaults = [$this->getKeyName()];
 
         if ($this->usesTimestamps()) {
@@ -553,14 +664,17 @@ abstract class Model
 
         return $instance;
     }
+
     /**
-     * Convert model to array
+     * Model'i array'e çevirir
+     *
+     * @return array
      */
     public function toArray(): array
     {
         $attributes = $this->attributesToArray();
 
-        // Apply hidden/visible
+        // visible/hidden uygula
         if (!empty($this->visible)) {
             $attributes = array_intersect_key($attributes, array_flip($this->visible));
         }
@@ -573,15 +687,22 @@ abstract class Model
     }
 
     /**
-     * Convert model to JSON
+     * Model'i JSON'a çevirir
+     *
+     * @param int $options JSON encode seçenekleri
+     * @return string
+     * @throws \JsonException
      */
     public function toJson(int $options = 0): string
     {
-        return json_encode($this->toArray(), $options);
+        return json_encode($this->toArray(), JSON_THROW_ON_ERROR | $options);
     }
 
     /**
-     * Create new instance from database row
+     * Database satırından yeni model oluşturur
+     *
+     * @param array $attributes
+     * @return static
      */
     public function newFromBuilder(array $attributes): static
     {
@@ -594,7 +715,7 @@ abstract class Model
     }
 
     /**
-     * Static: Create new model with attributes
+     * Static: Yeni model oluşturur ve kaydeder
      *
      * @param array $attributes
      * @return static
@@ -608,9 +729,9 @@ abstract class Model
     }
 
     /**
-     * Static: Find model by primary key
+     * Static: Primary key ile model bulur
      *
-     * @param mixed $id Primary key value
+     * @param mixed $id
      * @return static|null
      */
     public static function find(mixed $id): ?static
@@ -621,7 +742,7 @@ abstract class Model
     }
 
     /**
-     * Static: Find model or throw exception
+     * Static: Model bulamazsa exception fırlatır
      *
      * @param mixed $id
      * @return static
@@ -632,16 +753,19 @@ abstract class Model
         $model = static::find($id);
 
         if (is_null($model)) {
-            throw new ModelNotFoundException(
-                'Model ' . static::class . ' with ID ' . $id . ' not found'
-            );
+            throw (new ModelNotFoundException)
+                ->setModel(static::class)
+                ->setIds([$id]);
         }
 
         return $model;
     }
 
     /**
-     * Static: Get all models
+     * Static: Tüm modelleri döndürür
+     *
+     * @param array $columns
+     * @return Collection
      */
     public static function all(array $columns = ['*']): Collection
     {
@@ -649,7 +773,9 @@ abstract class Model
     }
 
     /**
-     * Static: Create query builder
+     * Static: Query builder oluşturur
+     *
+     * @return Builder
      */
     public static function query(): Builder
     {
@@ -657,17 +783,16 @@ abstract class Model
     }
 
     /**
-     * ✅ YENİ: BelongsToMany ilişkilerinde pivot data'ya erişim sağlar.
-     *
-     * @return object|null
+     * deleted_at null olan sütun adını döndürür
+     * @return string
      */
-    public function pivot(): ?object
+    public function getDeletedAtColumn(): string
     {
-        return $this->getRelation('pivot');
+        return 'deleted_at';
     }
 
     /**
-     * Static method forwarding to query builder
+     * Magic static method forwarding
      */
     public static function __callStatic(string $method, array $parameters): mixed
     {
@@ -675,7 +800,7 @@ abstract class Model
     }
 
     /**
-     * Instance method forwarding to query builder
+     * Magic instance method forwarding (query builder'a)
      */
     public function __call(string $method, array $parameters): mixed
     {
@@ -683,7 +808,7 @@ abstract class Model
     }
 
     /**
-     * Magic getter for attributes
+     * Magic getter
      */
     public function __get(string $key): mixed
     {
@@ -691,7 +816,7 @@ abstract class Model
     }
 
     /**
-     * Magic setter for attributes
+     * Magic setter
      */
     public function __set(string $key, mixed $value): void
     {
@@ -699,7 +824,7 @@ abstract class Model
     }
 
     /**
-     * Magic isset check
+     * Magic isset
      */
     public function __isset(string $key): bool
     {
@@ -716,6 +841,7 @@ abstract class Model
 
     /**
      * String representation
+     * @throws \JsonException
      */
     public function __toString(): string
     {

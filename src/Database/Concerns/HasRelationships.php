@@ -7,16 +7,16 @@ namespace Zephyr\Database\Concerns;
 use Zephyr\Database\Relations\HasMany;
 use Zephyr\Database\Relations\BelongsTo;
 use Zephyr\Database\Relations\HasOne;
-use Zephyr\Database\Relations\BelongsToMany; // <-- YENİ
+use Zephyr\Database\Relations\BelongsToMany;
 
 /**
  * Has Relationships Trait
  *
- * Provides relationship methods for models:
- * - hasMany: One-to-many relationship
- * - belongsTo: Inverse of hasMany
- * - hasOne: One-to-one relationship
- * - belongsToMany: Many-to-many relationship // <-- YENİ
+ * Model ilişkilerini yönetir:
+ * - hasMany: One-to-many ilişkisi
+ * - belongsTo: hasMany'nin tersi (inverse)
+ * - hasOne: One-to-one ilişkisi
+ * - belongsToMany: Many-to-many ilişkisi
  *
  * @author  Ahmet ALTUN
  * @email   ahmet.altun60@gmail.com
@@ -25,26 +25,28 @@ use Zephyr\Database\Relations\BelongsToMany; // <-- YENİ
 trait HasRelationships
 {
     /**
-     * Loaded relationships
+     * Yüklenmiş ilişkiler
+     * @var array
      */
     protected array $relations = [];
 
     /**
-     * Define a one-to-many relationship
+     * One-to-many ilişki tanımlar
      *
-     * @param string $related Related model class
-     * @param string|null $foreignKey Foreign key on related model
-     * @param string|null $localKey Local key on this model
+     * @param string $related İlişkili model sınıfı
+     * @param string|null $foreignKey İlişkili modeldeki foreign key
+     * @param string|null $localKey Bu modeldeki local key
      * @return HasMany
      *
      * @example
      * class User extends Model {
-     * public function posts() {
-     * return $this->hasMany(Post::class);
-     * }
+     *     public function posts() {
+     *         return $this->hasMany(Post::class);
+     *     }
      * }
      *
-     * $user->posts; // Get all posts
+     * Kullanım:
+     * $user->posts; // Tüm post'ları döndürür
      * $user->posts()->where('published', true)->get();
      */
     public function hasMany(
@@ -69,21 +71,22 @@ trait HasRelationships
     }
 
     /**
-     * Define an inverse one-to-many relationship
+     * Inverse one-to-many ilişki tanımlar
      *
-     * @param string $related Related model class
-     * @param string|null $foreignKey Foreign key on this model
-     * @param string|null $ownerKey Owner key on related model
+     * @param string $related İlişkili model sınıfı
+     * @param string|null $foreignKey Bu modeldeki foreign key
+     * @param string|null $ownerKey İlişkili modeldeki owner key
      * @return BelongsTo
      *
      * @example
      * class Post extends Model {
-     * public function user() {
-     * return $this->belongsTo(User::class);
-     * }
+     *     public function user() {
+     *         return $this->belongsTo(User::class);
+     *     }
      * }
      *
-     * $post->user; // Get the user
+     * Kullanım:
+     * $post->user; // User modelini döndürür
      */
     public function belongsTo(
         string $related,
@@ -92,7 +95,7 @@ trait HasRelationships
     ): BelongsTo {
         $instance = new $related;
 
-        // Default foreign key: user_id (from method name or related model)
+        // Default foreign key: user_id (metot adından veya related model'den)
         $foreignKey = $foreignKey ?? $this->guessBelongsToForeignKey($related);
 
         // Default owner key: id
@@ -107,21 +110,22 @@ trait HasRelationships
     }
 
     /**
-     * Define a one-to-one relationship
+     * One-to-one ilişki tanımlar
      *
-     * @param string $related Related model class
-     * @param string|null $foreignKey Foreign key on related model
-     * @param string|null $localKey Local key on this model
+     * @param string $related İlişkili model sınıfı
+     * @param string|null $foreignKey İlişkili modeldeki foreign key
+     * @param string|null $localKey Bu modeldeki local key
      * @return HasOne
      *
      * @example
      * class User extends Model {
-     * public function profile() {
-     * return $this->hasOne(Profile::class);
-     * }
+     *     public function profile() {
+     *         return $this->hasOne(Profile::class);
+     *     }
      * }
      *
-     * $user->profile; // Get the profile
+     * Kullanım:
+     * $user->profile; // Profile modelini döndürür
      */
     public function hasOne(
         string $related,
@@ -142,25 +146,28 @@ trait HasRelationships
     }
 
     /**
-     * Define a many-to-many relationship
+     * Many-to-many ilişki tanımlar
      *
-     * @param string $related Related model class
-     * @param string|null $table Pivot table
-     * @param string|null $foreignPivotKey Foreign key of this model on pivot
-     * @param string|null $relatedPivotKey Foreign key of related model on pivot
-     * @param string|null $parentKey Local key of this model
-     * @param string|null $relatedKey Local key of related model
+     * @param string $related İlişkili model sınıfı
+     * @param string|null $table Pivot tablo adı
+     * @param string|null $foreignPivotKey Bu modelin pivot'taki foreign key'i
+     * @param string|null $relatedPivotKey İlişkili modelin pivot'taki foreign key'i
+     * @param string|null $parentKey Bu modelin local key'i
+     * @param string|null $relatedKey İlişkili modelin local key'i
      * @return BelongsToMany
      *
      * @example
      * class User extends Model {
-     * public function roles() {
-     * return $this->belongsToMany(Role::class);
-     * }
+     *     public function roles() {
+     *         return $this->belongsToMany(Role::class);
+     *     }
      * }
      *
-     * $user->roles; // Get all roles
+     * Kullanım:
+     * $user->roles; // Tüm rolleri döndürür
      * $user->roles()->attach(1);
+     * $user->roles()->detach(1);
+     * $user->roles()->sync([1, 2, 3]);
      */
     public function belongsToMany(
         string $related,
@@ -172,8 +179,8 @@ trait HasRelationships
     ): BelongsToMany {
         $instance = new $related;
 
-        // 1. Pivot tablo adını tahmin et:
-        // (örn: Role ve User -> role_user (alfabetik))
+        // 1. Pivot tablo adını tahmin et (alfabetik sıralama)
+        // Örn: Role ve User -> role_user
         $parentName = strtolower(class_basename(static::class)); // user
         $relatedName = strtolower(class_basename($instance)); // role
         $models = [$parentName, $relatedName];
@@ -198,19 +205,19 @@ trait HasRelationships
     }
 
     /**
-     * Get relationship value
+     * İlişki değerini döndürür
      *
-     * @param string $key Relationship method name
+     * @param string $key İlişki metot adı
      * @return mixed
      */
     protected function getRelationValue(string $key): mixed
     {
-        // Check if already loaded
+        // Zaten yüklü mü kontrol et
         if (array_key_exists($key, $this->relations)) {
             return $this->relations[$key];
         }
 
-        // Load relationship
+        // İlişkiyi yükle
         if (method_exists($this, $key)) {
             return $this->getRelationshipFromMethod($key);
         }
@@ -219,13 +226,16 @@ trait HasRelationships
     }
 
     /**
-     * Load relationship from method
+     * Metottan ilişkiyi yükler
+     *
+     * @param string $method
+     * @return mixed
      */
     protected function getRelationshipFromMethod(string $method): mixed
     {
         $relation = $this->$method();
 
-        // Execute relation and cache result
+        // İlişkiyi çalıştır ve cache'le
         $results = $relation->getResults();
         $this->relations[$method] = $results;
 
@@ -233,9 +243,9 @@ trait HasRelationships
     }
 
     /**
-     * Get foreign key name for this model
+     * Bu model için foreign key adını döndürür
      *
-     * @return string (e.g., 'user_id' for User model)
+     * @return string Örn: User modeli için 'user_id'
      */
     protected function getForeignKey(): string
     {
@@ -243,7 +253,10 @@ trait HasRelationships
     }
 
     /**
-     * Guess belongs to foreign key from related model
+     * BelongsTo için foreign key'i tahmin eder
+     *
+     * @param string $related
+     * @return string
      */
     protected function guessBelongsToForeignKey(string $related): string
     {
@@ -252,7 +265,11 @@ trait HasRelationships
     }
 
     /**
-     * Set relationship value
+     * İlişki değerini set eder
+     *
+     * @param string $relation
+     * @param mixed $value
+     * @return self
      */
     public function setRelation(string $relation, mixed $value): self
     {
@@ -261,7 +278,9 @@ trait HasRelationships
     }
 
     /**
-     * Get all loaded relationships
+     * Tüm yüklenmiş ilişkileri döndürür
+     *
+     * @return array
      */
     public function getRelations(): array
     {
@@ -269,7 +288,10 @@ trait HasRelationships
     }
 
     /**
-     * Check if relationship is loaded
+     * İlişki önceden döndürülmüş yüklenmiş mi kontrol eder
+     *
+     * @param string $key
+     * @return bool
      */
     public function relationLoaded(string $key): bool
     {
@@ -277,13 +299,26 @@ trait HasRelationships
     }
 
     /**
-     * Eager load relationships
+     * Belirli bir ilişkiyi döndürür
+     *
+     * @param string $key
+     * @return mixed
+     */
+    public function getRelation(string $key): mixed
+    {
+        return $this->relations[$key] ?? null;
+    }
+
+    /**
+     * İlişkileri eager load eder
      *
      * @param array|string $relations
      * @return self
      *
      * @example
-     * $users = User::with('posts', 'profile')->get();
+     * $user->load('posts', 'profile');
+     * $users = User::all();
+     * $users->load('posts');
      */
     public function load(array|string $relations): self
     {

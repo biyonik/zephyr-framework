@@ -7,41 +7,73 @@ namespace Zephyr\Database;
 use Zephyr\Database\Schema\Builder as SchemaBuilder;
 
 /**
- * Temel Veritabanı Geçiş Sınıfı
+ * Migration Base Class
  *
- * Tüm migration'lar bu sınıfı miras alır.
- * Şema değişiklikleri için 'up' ve 'down' metotlarını sağlar.
+ * Tüm migration'ların miras aldığı temel sınıf.
+ * Database şeması değişikliklerini yönetir.
+ *
+ * Her migration iki metot içerir:
+ * - up(): İleriye doğru değişiklik (tablo oluştur, sütun ekle)
+ * - down(): Geriye doğru değişiklik (rollback)
+ *
+ * Kullanım:
+ * class CreateUsersTable extends Migration {
+ *     public function up(): void {
+ *         $this->schema->create('users', function (Blueprint $table) {
+ *             $table->id();
+ *             $table->string('name');
+ *             $table->timestamps();
+ *         });
+ *     }
+ *
+ *     public function down(): void {
+ *         $this->schema->dropIfExists('users');
+ *     }
+ * }
+ *
+ * @author  Ahmet ALTUN
+ * @email   ahmet.altun60@gmail.com
+ * @github  https://github.com/biyonik
  */
 abstract class Migration
 {
     /**
-     * Veritabanı bağlantısı
+     * PDO connection
      */
     protected \PDO $pdo;
 
     /**
-     * Constructor.
-     * Container üzerinden veritabanı bağlantısını alır.
+     * Schema builder
+     */
+    protected SchemaBuilder $schema;
+
+    /**
+     * Constructor
+     *
+     * Database bağlantısını ve schema builder'ı hazırlar.
+     *
      * @throws \Exception
      */
     public function __construct()
     {
-        $connection = app(Connection::class); // <-- Bağlantıyı al
+        $connection = app(Connection::class);
         $this->pdo = $connection->getPdo();
-
-        // YENİ: Schema Builder'ı migration sınıfı için hazırla
         $this->schema = new SchemaBuilder($connection);
     }
 
     /**
-     * Geçişi uygular (Veritabanını ileri alır).
+     * Migration'ı uygular (ileri)
+     *
+     * Tablo oluşturma, sütun ekleme gibi işlemler.
      *
      * @return void
      */
     abstract public function up(): void;
 
     /**
-     * Geçişi geri alır (Veritabanını geri alır).
+     * Migration'ı geri alır (rollback)
+     *
+     * up() metodunun tersini yapar.
      *
      * @return void
      */

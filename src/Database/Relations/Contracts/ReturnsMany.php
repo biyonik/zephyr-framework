@@ -4,14 +4,17 @@ declare(strict_types=1);
 
 namespace Zephyr\Database\Relations\Contracts;
 
-use Zephyr\Database\Model;
 use Zephyr\Support\Collection;
 
 /**
  * Returns Many Contract
  *
- * Interface for relationships that return multiple models.
- * Examples: HasMany
+ * Çoklu model döndüren ilişkiler için arayüz.
+ * Collection döndürmeyi garanti eder.
+ *
+ * Bu interface'i implement eden sınıflar:
+ * - HasMany (one-to-many)
+ * - BelongsToMany (many-to-many)
  *
  * @author  Ahmet ALTUN
  * @email   ahmet.altun60@gmail.com
@@ -20,14 +23,15 @@ use Zephyr\Support\Collection;
 interface ReturnsMany extends RelationContract
 {
     /**
-     * Get relationship results
+     * İlişki sonuçlarını döndürür
      *
-     * Returns an array of related models.
+     * Her zaman Collection döndürür (boş olsa bile).
      *
-     * @return array<Model> Array of related model instances
+     * @return Collection Model collection'ı
      *
      * @example
-     * $user->posts()->getResults() // Returns array of Post models
+     * $posts = $user->posts()->getResults();
+     * // Returns: Collection<Post> (boş veya dolu)
      */
     public function getResults(): Collection;
 }

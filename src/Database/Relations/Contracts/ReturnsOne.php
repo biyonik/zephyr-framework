@@ -9,8 +9,12 @@ use Zephyr\Database\Model;
 /**
  * Returns One Contract
  *
- * Interface for relationships that return a single model or null.
- * Examples: HasOne, BelongsTo
+ * Tek model veya null döndüren ilişkiler için arayüz.
+ * ?Model döndürmeyi garanti eder.
+ *
+ * Bu interface'i implement eden sınıflar:
+ * - HasOne (one-to-one)
+ * - BelongsTo (inverse one-to-many)
  *
  * @author  Ahmet ALTUN
  * @email   ahmet.altun60@gmail.com
@@ -19,15 +23,18 @@ use Zephyr\Database\Model;
 interface ReturnsOne extends RelationContract
 {
     /**
-     * Get relationship results
+     * İlişki sonucunu döndürür
      *
-     * Returns a single related model or null if not found.
+     * Tek model veya null döndürür.
      *
-     * @return Model|null Related model instance or null
+     * @return Model|null Model instance veya null
      *
      * @example
-     * $user->profile()->getResults() // Returns Profile model or null
-     * $post->user()->getResults() // Returns User model or null
+     * $profile = $user->profile()->getResults();
+     * // Returns: ?Profile
+     *
+     * $user = $post->user()->getResults();
+     * // Returns: ?User
      */
     public function getResults(): ?Model;
 }

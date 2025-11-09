@@ -4,24 +4,29 @@ declare(strict_types=1);
 
 namespace Zephyr\Database\Relations;
 
-use Zephyr\Database\Query\Builder;
 use Zephyr\Database\Model;
 use Zephyr\Database\Relations\Contracts\ReturnsOne;
+use Zephyr\Support\Collection;
 
 /**
  * Has One Relation
  *
- * One-to-one relationship (e.g., User has one Profile).
- * Extends HasMany but implements ReturnsOne interface - returns single model instead of array.
+ * One-to-one ilişkisini temsil eder (Bir kullanıcının bir profili var).
+ * HasMany'yi extend eder ama ReturnsOne implement eder - tek model döndürür.
  *
- * Usage:
+ * Kullanım:
  * class User extends Model {
  *     public function profile() {
  *         return $this->hasOne(Profile::class);
  *     }
  * }
  *
- * $user->profile; // Get the profile (single model or null)
+ * Çağırma:
+ * $user->profile; // ?Model
+ * $user->profile()->where('verified', true)->first();
+ *
+ * Eager Loading:
+ * User::with('profile')->get();
  *
  * @author  Ahmet ALTUN
  * @email   ahmet.altun60@gmail.com
@@ -30,37 +35,56 @@ use Zephyr\Database\Relations\Contracts\ReturnsOne;
 class HasOne extends HasMany implements ReturnsOne
 {
     /**
-     * Get results for relationship
+     * İlişki sonucunu döndürür
      *
-     * Overrides HasMany to return single Model instead of array.
-     * Parent's mixed return type allows this covariant return.
+     * ReturnsOne interface implementasyonu.
+     * HasMany'nin getResults() metodunu override eder.
      *
-     * @return Model|null Single related model or null
+     * @return Model|null Tek model veya null
+     *
+     * @example
+     * $profile = $user->profile()->getResults();
+     * // Returns: ?Profile
      */
     public function getResults(): ?Model
     {
-        return $this->query->first();
+        $results = parent::getResults();
+
+        return $results->first() ?: null;
     }
 
     /**
-     * Match eager loaded results to parent models
+     * Eager loading sonuçlarını üst modellerle eşleştirir
      *
-     * @param array $models Parent models
-     * @param array $results Related models
-     * @param string $relation Relationship name
-     * @return array
+     * HasMany'nin match() metodunu override eder.
+     * Her üst model'e tek sonuç (veya null) atar.
+     *
+     * @param array<Model> $models Üst modeller
+     * @param array<Model> $results İlişkili modeller
+     * @param string $relation İlişki adı
+     * @return array<Model> İlişkiler yüklenmiş üst modeller
+     *
+     * @example
+     * Input:
+     *   $models = [User(id=1), User(id=2), User(id=3)]
+     *   $results = [Profile(user_id=1), Profile(user_id=3)]
+     *
+     * Output:
+     *   User(id=1)->profile = Profile(user_id=1)
+     *   User(id=2)->profile = null
+     *   User(id=3)->profile = Profile(user_id=3)
      */
     public function match(array $models, array $results, string $relation): array
     {
-        // Build dictionary of results keyed by foreign key
+        // Sonuçları foreign key'e göre dictionary oluştur
         $dictionary = $this->buildDictionary($results);
 
-        // Match single result to each parent model
+        // Her üst model'e tek sonuç ata
         foreach ($models as $model) {
             $key = $model->getAttribute($this->localKey);
 
             if (isset($dictionary[$key])) {
-                // Get first (and only) result
+                // İlk (ve tek) sonucu al
                 $model->setRelation($relation, $dictionary[$key][0] ?? null);
             } else {
                 $model->setRelation($relation, null);
@@ -71,11 +95,13 @@ class HasOne extends HasMany implements ReturnsOne
     }
 
     /**
-     * Initialize relation on a set of models
+     * İlişkileri model setine başlatır
      *
-     * @param array $models
+     * Eager loading öncesi tüm modellere null atar.
+     *
+     * @param array<Model> $models
      * @param string $relation
-     * @return array
+     * @return array<Model>
      */
     public function initRelation(array $models, string $relation): array
     {

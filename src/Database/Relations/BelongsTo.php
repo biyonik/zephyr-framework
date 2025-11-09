@@ -11,17 +11,22 @@ use Zephyr\Database\Relations\Contracts\ReturnsOne;
 /**
  * Belongs To Relation
  *
- * Inverse of one-to-many (e.g., Post belongs to User).
- * Implements ReturnsOne interface - returns single model or null.
+ * One-to-many ilişkisinin tersi (Bir gönderi bir kullanıcıya aittir).
+ * ReturnsOne interface'ini implement eder - tek model veya null döndürür.
  *
- * Usage:
+ * Kullanım:
  * class Post extends Model {
  *     public function user() {
  *         return $this->belongsTo(User::class);
  *     }
  * }
  *
- * $post->user; // Get the user (single model or null)
+ * Çağırma:
+ * $post->user; // ?Model
+ * $post->user()->where('active', true)->first();
+ *
+ * Eager Loading:
+ * Post::with('user')->get();
  *
  * @author  Ahmet ALTUN
  * @email   ahmet.altun60@gmail.com
@@ -30,22 +35,22 @@ use Zephyr\Database\Relations\Contracts\ReturnsOne;
 class BelongsTo extends Relation implements ReturnsOne
 {
     /**
-     * Foreign key on this model (e.g., 'user_id')
+     * Bu modeldeki foreign key (örn: 'user_id')
      */
     protected string $foreignKey;
 
     /**
-     * Owner key on related model (e.g., 'id')
+     * İlişkili modeldeki owner key (örn: 'id')
      */
     protected string $ownerKey;
 
     /**
      * Constructor
      *
-     * @param Builder $query Related model query
-     * @param Model $parent Parent (child) model
-     * @param string $foreignKey Foreign key on parent
-     * @param string $ownerKey Primary key on related model
+     * @param Builder $query İlişkili model query'si
+     * @param Model $parent Alt model (child)
+     * @param string $foreignKey Bu modeldeki foreign key
+     * @param string $ownerKey İlişkili modeldeki primary key
      */
     public function __construct(
         Builder $query,
@@ -62,15 +67,15 @@ class BelongsTo extends Relation implements ReturnsOne
     }
 
     /**
-     * Add constraints to query
+     * Query'ye kısıtları ekler (tek model için)
      *
-     * Implementation of RelationContract interface.
-     * Adds WHERE clause for the parent model.
+     * RelationContract interface implementasyonu.
+     * Lazy loading için WHERE clause ekler.
      *
      * @return void
      *
      * @example
-     * $post->user() adds: WHERE users.id = $post->user_id
+     * $post->user() için: WHERE users.id = $post->user_id
      */
     public function addConstraints(): void
     {
@@ -82,48 +87,48 @@ class BelongsTo extends Relation implements ReturnsOne
     }
 
     /**
-     * Add eager loading constraints
+     * Eager loading için kısıtları ekler (çoklu model için)
      *
-     * Implementation of RelationContract interface.
-     * Adds WHERE IN clause for multiple child models.
+     * RelationContract interface implementasyonu.
+     * WHERE IN clause ile çoklu alt model için query oluşturur.
      *
-     * @param array<Model> $models Child models
+     * @param array<Model> $models Alt modeller
      * @return void
      *
      * @example
-     * Post::with('user') adds: WHERE users.id IN (1, 2, 3, ...)
-     * (where 1, 2, 3 are the user_id values from posts)
+     * Post::with('user') için: WHERE users.id IN (1, 2, 3, ...)
+     * (1, 2, 3 post'ların user_id değerleri)
      */
     public function addEagerConstraints(array $models): void
     {
-        // Get all foreign key values from child models
+        // Tüm alt modellerden foreign key değerlerini topla
         $keys = array_map(function ($model) {
             return $model->getAttribute($this->foreignKey);
         }, $models);
 
-        // Remove nulls and duplicates
+        // Null ve duplicate'leri temizle
         $keys = array_unique(array_filter($keys));
 
         if (empty($keys)) {
-            // No keys, return nothing
+            // Key yoksa hiçbir şey döndürme
             $this->query->where($this->ownerKey, '=', null);
             return;
         }
 
-        // Add WHERE IN constraint
+        // WHERE IN kısıtı ekle
         $this->query->whereIn($this->ownerKey, $keys);
     }
 
     /**
-     * Match eager loaded results to child models
+     * Eager loading sonuçlarını alt modellerle eşleştirir
      *
-     * Implementation of RelationContract interface.
-     * Matches parent models to child models based on foreign key.
+     * RelationContract interface implementasyonu.
+     * Sonuçları owner key'e göre dictionary oluşturur ve alt modellere atar.
      *
-     * @param array<Model> $models Child models
-     * @param array<Model> $results Parent models
-     * @param string $relation Relationship name
-     * @return array<Model> Child models with loaded parent relationships
+     * @param array<Model> $models Alt modeller
+     * @param array<Model> $results Üst modeller
+     * @param string $relation İlişki adı
+     * @return array<Model> İlişkiler yüklenmiş alt modeller
      *
      * @example
      * Input:
@@ -137,10 +142,10 @@ class BelongsTo extends Relation implements ReturnsOne
      */
     public function match(array $models, array $results, string $relation): array
     {
-        // Build dictionary of results keyed by owner key
+        // Sonuçları owner key'e göre dictionary oluştur
         $dictionary = $this->buildDictionary($results);
 
-        // Match results to each child model
+        // Her alt model'e sonucu ata
         foreach ($models as $model) {
             $foreignKeyValue = $model->getAttribute($this->foreignKey);
 
@@ -155,11 +160,11 @@ class BelongsTo extends Relation implements ReturnsOne
     }
 
     /**
-     * Build dictionary of results keyed by owner key
+     * Sonuçları owner key'e göre dictionary oluşturur
      *
-     * Creates a lookup dictionary for efficient matching.
+     * Verimli eşleştirme için lookup dictionary.
      *
-     * @param array<Model> $results Parent models
+     * @param array<Model> $results Üst modeller
      * @return array<int|string, Model> Dictionary: owner_key => Model
      *
      * @example
@@ -183,16 +188,15 @@ class BelongsTo extends Relation implements ReturnsOne
     }
 
     /**
-     * Get results for relationship
+     * İlişki sonucunu döndürür
      *
-     * Implementation of ReturnsOne interface.
-     * Returns single parent model or null if not found.
+     * ReturnsOne interface implementasyonu.
      *
-     * @return Model|null Related parent model or null
+     * @return Model|null İlişkili üst model veya null
      *
      * @example
      * $user = $post->user()->getResults();
-     * // Returns: User model or null
+     * // Returns: ?User
      */
     public function getResults(): ?Model
     {
@@ -200,29 +204,29 @@ class BelongsTo extends Relation implements ReturnsOne
     }
 
     /**
-     * Associate a related model
+     * İlişkili model'i ilişkilendirir (associate)
      *
-     * Sets the foreign key to the related model's primary key.
-     * Useful for establishing relationships before saving.
+     * Foreign key'i ilişkili modelin primary key'ine set eder.
+     * İlişki kurmadan önce kullanılır.
      *
-     * @param Model $model Related model to associate
-     * @return Model Parent (child) model with updated foreign key
+     * @param Model $model İlişkilendirilecek model
+     * @return Model Alt model (foreign key güncellenmiş)
      *
      * @example
-     * $post = new Post(['title' => 'My Post']);
+     * $post = new Post(['title' => 'Başlık']);
      * $post->user()->associate($user);
      * // Sets: $post->user_id = $user->id
      * $post->save();
      */
     public function associate(Model $model): Model
     {
-        // Set foreign key to related model's primary key
+        // Foreign key'i set et
         $this->parent->setAttribute(
             $this->foreignKey,
             $model->getAttribute($this->ownerKey)
         );
 
-        // Cache the related model
+        // İlişkili model'i cache'le
         $this->parent->setRelation(
             $this->getRelationName(),
             $model
@@ -232,11 +236,11 @@ class BelongsTo extends Relation implements ReturnsOne
     }
 
     /**
-     * Dissociate the related model
+     * İlişkili model'i ilişkiden ayırır (dissociate)
      *
-     * Clears the foreign key, removing the relationship.
+     * Foreign key'i temizler (NULL yapar).
      *
-     * @return Model Parent (child) model with cleared foreign key
+     * @return Model Alt model (foreign key temizlenmiş)
      *
      * @example
      * $post->user()->dissociate();
@@ -245,41 +249,38 @@ class BelongsTo extends Relation implements ReturnsOne
      */
     public function dissociate(): Model
     {
-        // Clear foreign key
+        // Foreign key'i temizle
         $this->parent->setAttribute($this->foreignKey, null);
 
-        // Clear cached relation
+        // Cache'i temizle
         $this->parent->setRelation($this->getRelationName(), null);
 
         return $this->parent;
     }
 
     /**
-     * Get relationship name (for caching)
+     * İlişki metot adını döndürür (cache için)
      *
-     * Attempts to extract the relationship method name from backtrace.
-     * Used for caching related models.
+     * Backtrace'den ilişki metot adını çıkarmaya çalışır.
      *
-     * @return string Relationship method name
+     * @return string İlişki metot adı
      */
     protected function getRelationName(): string
     {
-        // Try to extract from backtrace
+        // Backtrace'den çıkar
         $backtrace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 3);
         return $backtrace[2]['function'] ?? 'relation';
     }
 
     /**
-     * Update parent model with relationship
+     * İlişkili üst model'i günceller
      *
-     * Updates the related parent model directly.
-     *
-     * @param array $attributes Attributes to update
-     * @return int Number of affected rows
+     * @param array $attributes Güncellenecek attribute'lar
+     * @return int Etkilenen satır sayısı
      *
      * @example
-     * $post->user()->update(['name' => 'Updated Name']);
-     * // Updates the user that the post belongs to
+     * $post->user()->update(['name' => 'Yeni İsim']);
+     * // Post'un ait olduğu user'ı günceller
      */
     public function update(array $attributes): int
     {

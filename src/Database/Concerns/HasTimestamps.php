@@ -7,8 +7,16 @@ namespace Zephyr\Database\Concerns;
 /**
  * Has Timestamps Trait
  *
- * Automatically manages created_at and updated_at timestamps.
- * Can be disabled by setting $timestamps = false.
+ * created_at ve updated_at sütunlarını otomatik yönetir.
+ * Model kaydedilirken timestamps otomatik güncellenir.
+ *
+ * Kullanım:
+ * - $model->timestamps = true (varsayılan)
+ * - $model->timestamps = false (devre dışı bırakmak için)
+ *
+ * Özelleştirme:
+ * - $createdAtColumn değiştirilebilir
+ * - $updatedAtColumn değiştirilebilir
  *
  * @author  Ahmet ALTUN
  * @email   ahmet.altun60@gmail.com
@@ -17,22 +25,24 @@ namespace Zephyr\Database\Concerns;
 trait HasTimestamps
 {
     /**
-     * Enable automatic timestamps
+     * Otomatik timestamps aktif mi?
      */
     public bool $timestamps = true;
 
     /**
-     * Created at column name
+     * created_at sütun adı
      */
     protected string $createdAtColumn = 'created_at';
 
     /**
-     * Updated at column name
+     * updated_at sütun adı
      */
     protected string $updatedAtColumn = 'updated_at';
 
     /**
-     * Check if model uses timestamps
+     * Model timestamps kullanıyor mu kontrol eder
+     *
+     * @return bool
      */
     public function usesTimestamps(): bool
     {
@@ -40,7 +50,9 @@ trait HasTimestamps
     }
 
     /**
-     * Get created at column name
+     * created_at sütun adını döndürür
+     *
+     * @return string
      */
     public function getCreatedAtColumn(): string
     {
@@ -48,7 +60,9 @@ trait HasTimestamps
     }
 
     /**
-     * Get updated at column name
+     * updated_at sütun adını döndürür
+     *
+     * @return string
      */
     public function getUpdatedAtColumn(): string
     {
@@ -56,16 +70,20 @@ trait HasTimestamps
     }
 
     /**
-     * Update timestamp columns
+     * Timestamp sütunlarını günceller
+     *
+     * Bu metot Model::save() içinde otomatik çağrılır.
+     *
+     * @return self
      */
     public function updateTimestamps(): self
     {
         $time = $this->freshTimestamp();
 
-        // Set updated_at
+        // updated_at'i her zaman güncelle
         $this->setUpdatedAt($time);
 
-        // Set created_at only if new record
+        // created_at'i sadece yeni kayıtlarda set et
         if (!$this->exists && !$this->isDirty($this->getCreatedAtColumn())) {
             $this->setCreatedAt($time);
         }
@@ -74,7 +92,9 @@ trait HasTimestamps
     }
 
     /**
-     * Get fresh timestamp for model
+     * Yeni timestamp değeri oluşturur
+     *
+     * @return string Y-m-d H:i:s formatında timestamp
      */
     protected function freshTimestamp(): string
     {
@@ -82,7 +102,9 @@ trait HasTimestamps
     }
 
     /**
-     * Get fresh timestamp value
+     * Timestamp string olarak döndürür
+     *
+     * @return string
      */
     public function freshTimestampString(): string
     {
@@ -90,7 +112,10 @@ trait HasTimestamps
     }
 
     /**
-     * Set created_at timestamp
+     * created_at değerini set eder
+     *
+     * @param mixed $value Timestamp değeri
+     * @return self
      */
     public function setCreatedAt(mixed $value): self
     {
@@ -99,7 +124,10 @@ trait HasTimestamps
     }
 
     /**
-     * Set updated_at timestamp
+     * updated_at değerini set eder
+     *
+     * @param mixed $value Timestamp değeri
+     * @return self
      */
     public function setUpdatedAt(mixed $value): self
     {
@@ -108,7 +136,9 @@ trait HasTimestamps
     }
 
     /**
-     * Get created_at timestamp
+     * created_at değerini döndürür
+     *
+     * @return mixed
      */
     public function getCreatedAt(): mixed
     {
@@ -116,7 +146,9 @@ trait HasTimestamps
     }
 
     /**
-     * Get updated_at timestamp
+     * updated_at değerini döndürür
+     *
+     * @return mixed
      */
     public function getUpdatedAt(): mixed
     {
@@ -124,7 +156,14 @@ trait HasTimestamps
     }
 
     /**
-     * Touch updated_at timestamp
+     * updated_at'i günceller (kayıt yapmadan)
+     *
+     * Model'i değiştirmeden sadece updated_at'i güncellemek için kullanılır.
+     *
+     * @return bool
+     *
+     * @example
+     * $post->touch(); // updated_at güncellenir
      */
     public function touch(): bool
     {

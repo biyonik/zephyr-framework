@@ -10,13 +10,17 @@ use Zephyr\Database\Exception\ModelNotFoundException;
 use Zephyr\Support\Collection;
 
 /**
- * Model Query Builder
+ * Model-Aware Query Builder
  *
- * Extends QueryBuilder to add model-specific functionality:
- * - Returns model instances instead of arrays
- * - Supports relationships
- * - Eager loading
- * - Model hydration
+ * QueryBuilder'ı extends ederek Model nesneleri döndürür.
+ * Array yerine Model instance'ları ile çalışır.
+ *
+ * Özellikler:
+ * - Model hydration (array → Model dönüşümü)
+ * - Eager loading (with)
+ * - Query scopes
+ * - Global scopes
+ * - Collection döndürme
  *
  * @author  Ahmet ALTUN
  * @email   ahmet.altun60@gmail.com
@@ -25,17 +29,25 @@ use Zephyr\Support\Collection;
 class Builder extends QueryBuilder
 {
     /**
-     * The model being queried
+     * Sorgulanacak model
      */
     protected ?Model $model = null;
 
     /**
-     * Relationships to eager load
+     * Eager load edilecek ilişkiler
      */
     protected array $eagerLoad = [];
 
     /**
-     * Set the model being queried
+     * Devre dışı bırakılmış global scope'lar
+     */
+    protected array $removedScopes = [];
+
+    /**
+     * Model'i set eder
+     *
+     * @param Model $model
+     * @return self
      */
     public function setModel(Model $model): self
     {
@@ -44,7 +56,9 @@ class Builder extends QueryBuilder
     }
 
     /**
-     * Get the model instance
+     * Model instance'ını döndürür
+     *
+     * @return Model|null
      */
     public function getModel(): ?Model
     {
@@ -52,32 +66,30 @@ class Builder extends QueryBuilder
     }
 
     /**
-     * Execute query and get model instances
+     * Sorguyu çalıştırır ve Model Collection döndürür
      *
-     * @return Collection Array of model instances
+     * @return Collection Model collection
      */
     public function get(): Collection
     {
-        $results = parent::get();
+        $results = parent::get(); // array döner
 
         if (empty($results)) {
             return $this->model->newCollection([]);
         }
 
         $models = $this->hydrate($results);
-
-        // Modelleri Collection içine al
         return $this->model->newCollection($models);
     }
 
     /**
-     * Get first model instance
+     * İlk modeli döndürür
      *
      * @return Model|null
      */
     public function first(): ?Model
     {
-        $result = parent::first(); // returns ?array
+        $result = parent::first(); // ?array döner
 
         if (is_null($result)) {
             return null;
@@ -88,10 +100,10 @@ class Builder extends QueryBuilder
     }
 
     /**
-     * Find model by primary key
+     * Primary key ile model bulur
      *
-     * @param mixed $id Primary key value
-     * @param array $columns Columns to select
+     * @param mixed $id Primary key değeri
+     * @param array $columns Seçilecek sütunlar
      * @return Model|null
      */
     public function find(mixed $id, array $columns = ['*']): ?Model
@@ -102,7 +114,7 @@ class Builder extends QueryBuilder
     }
 
     /**
-     * Find model or throw exception
+     * Model bulamazsa exception fırlatır
      *
      * @param mixed $id
      * @param array $columns
@@ -123,11 +135,11 @@ class Builder extends QueryBuilder
     }
 
     /**
-     * Find multiple models by primary keys
+     * Çoklu primary key ile modelleri bulur
      *
      * @param array $ids
      * @param array $columns
-     * @return array
+     * @return Collection
      */
     public function findMany(array $ids, array $columns = ['*']): Collection
     {
@@ -141,7 +153,7 @@ class Builder extends QueryBuilder
     }
 
     /**
-     * Insert and get model instance
+     * Model oluşturur ve kaydeder
      *
      * @param array $values
      * @return Model
@@ -160,7 +172,7 @@ class Builder extends QueryBuilder
     }
 
     /**
-     * Insert and get last insert ID
+     * INSERT yapar ve ID döndürür
      *
      * @param array $values
      * @return string
@@ -171,23 +183,21 @@ class Builder extends QueryBuilder
     }
 
     /**
-     * Eager load relationships
+     * Eager loading için ilişkileri belirler
      *
      * @param array|string $relations
      * @return self
      *
      * @example
      * User::with('posts', 'profile')->get();
-     * User::with(['posts' => function($query) {
-     *     $query->where('published', true);
-     * }])->get();
+     * User::with(['posts' => fn($q) => $q->where('published', true)])->get();
      */
     public function with(array|string $relations): self
     {
         $relations = is_string($relations) ? func_get_args() : $relations;
 
         foreach ($relations as $name => $constraints) {
-            // Simple string relation
+            // Basit string relation
             if (is_numeric($name)) {
                 $name = $constraints;
                 $constraints = null;
@@ -200,18 +210,46 @@ class Builder extends QueryBuilder
     }
 
     /**
-     * Global scope olmadan sorgu oluşturur.
+     * Global scope'u devre dışı bırakır
+     *
+     * @param string|array $scopes Scope sınıf adı(ları)
+     * @return self
      */
-    public function withoutGlobalScope(string $scope): self
+    public function withoutGlobalScope(string|array $scopes): self
     {
-        // Bu metod global scope'ları devre dışı bırakır
-        // Şimdilik basit implementation:
-        // (Global scope sistemi tam implement edilince güncellenir)
+        $scopes = is_array($scopes) ? $scopes : func_get_args();
+
+        foreach ($scopes as $scope) {
+            $this->removedScopes[$scope] = true;
+        }
+
         return $this;
     }
 
     /**
-     * Eager load relationships on models
+     * Tüm global scope'ları devre dışı bırakır
+     *
+     * @return self
+     */
+    public function withoutGlobalScopes(): self
+    {
+        $this->removedScopes = ['*' => true];
+        return $this;
+    }
+
+    /**
+     * Global scope devre dışı mı kontrol eder
+     *
+     * @param string $scope
+     * @return bool
+     */
+    protected function scopeIsRemoved(string $scope): bool
+    {
+        return isset($this->removedScopes['*']) || isset($this->removedScopes[$scope]);
+    }
+
+    /**
+     * Model'leri eager load eder
      *
      * @param array $models
      * @return array
@@ -226,10 +264,10 @@ class Builder extends QueryBuilder
     }
 
     /**
-     * Eager load a single relationship
+     * Tek bir ilişkiyi eager load eder
      *
      * @param array $models
-     * @param string $name Relationship name
+     * @param string $name İlişki adı
      * @param callable|null $constraints Query constraints
      * @return array
      */
@@ -239,23 +277,23 @@ class Builder extends QueryBuilder
             return $models;
         }
 
-        // Get relation instance from first model
+        // İlk model'den relation instance al
         $relation = $models[0]->$name();
 
-        // Apply constraints if provided
+        // Constraint'leri uygula
         if (!is_null($constraints)) {
             $constraints($relation);
         }
 
-        // Load relation for all models
+        // Tüm modeller için relation'ı yükle
         return $relation->eagerLoadAndMatch($models, $name);
     }
 
     /**
-     * Hydrate models from database results
+     * Array'leri Model'lere dönüştürür (hydration)
      *
-     * @param array $items Raw database rows
-     * @return array Array of model instances
+     * @param array $items Ham database satırları
+     * @return array Model instance'ları
      */
     protected function hydrate(array $items): array
     {
@@ -263,7 +301,7 @@ class Builder extends QueryBuilder
             return $this->model->newFromBuilder($item);
         }, $items);
 
-        // Eager load relationships if any
+        // Eager loading varsa uygula
         if (!empty($this->eagerLoad)) {
             $models = $this->eagerLoadRelations($models);
         }
@@ -272,7 +310,7 @@ class Builder extends QueryBuilder
     }
 
     /**
-     * Paginate and return models
+     * Sayfalama yapar ve Model collection döndürür
      *
      * @param int $page
      * @param int $perPage
@@ -282,14 +320,16 @@ class Builder extends QueryBuilder
     {
         $result = parent::paginate($page, $perPage);
 
-        // Hydrate data
+        // Data'yı hydrate et
         $result['data'] = $this->hydrate($result['data']);
 
         return $result;
     }
 
     /**
-     * Get count of models
+     * Model sayısını döndürür
+     *
+     * @return int
      */
     public function count(): int
     {
@@ -297,7 +337,9 @@ class Builder extends QueryBuilder
     }
 
     /**
-     * Check if any models exist
+     * Model var mı kontrol eder
+     *
+     * @return bool
      */
     public function exists(): bool
     {
@@ -305,7 +347,7 @@ class Builder extends QueryBuilder
     }
 
     /**
-     * Chunk results and hydrate models
+     * Chunk processing (Model'lerle)
      *
      * @param int $size
      * @param callable $callback
@@ -320,11 +362,15 @@ class Builder extends QueryBuilder
     }
 
     /**
-     * Apply query scopes from model
+     * Model scope'larını uygular
      *
-     * @param string $scope Scope method name
-     * @param array $parameters Scope parameters
+     * @param string $scope Scope method adı
+     * @param array $parameters Parametreler
      * @return self
+     *
+     * @example
+     * Model'de: public function scopeActive($query) { ... }
+     * Kullanım: User::active()->get(); veya $query->scope('active')
      */
     public function scope(string $scope, array $parameters = []): self
     {
@@ -338,18 +384,18 @@ class Builder extends QueryBuilder
     }
 
     /**
-     * Dynamic scope method calls
+     * Dinamik scope method çağrıları
      *
-     * @example User::active()->get() calls scopeActive()
+     * @example User::active()->get() -> scopeActive() çağrılır
      */
     public function __call(string $method, array $parameters): mixed
     {
-        // Try to call scope
+        // Scope dene
         if (method_exists($this->model, 'scope' . ucfirst($method))) {
             return $this->scope($method, $parameters);
         }
 
-        // Fall back to parent
+        // Parent'a düş
         return parent::__call($method, $parameters);
     }
 }

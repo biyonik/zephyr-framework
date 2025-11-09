@@ -7,18 +7,19 @@ namespace Zephyr\Database\Relations;
 use Zephyr\Database\Query\Builder;
 use Zephyr\Database\Model;
 use Zephyr\Database\Relations\Contracts\RelationContract;
+use Zephyr\Support\Collection;
 
 /**
  * Base Relation Class
  *
- * Abstract base for all relationship types.
- * Provides common functionality for:
- * - Query building
- * - Eager loading
- * - Method forwarding to query builder
+ * Tüm ilişki tiplerinin miras aldığı temel sınıf.
+ * Ortak fonksiyonalite sağlar:
+ * - Query builder yönetimi
+ * - Eager loading koordinasyonu
+ * - Metot forwarding
  *
- * Each child class implements either ReturnsMany or ReturnsOne interface
- * to define its specific return type for getResults().
+ * Alt sınıflar ReturnsMany veya ReturnsOne implement ederek
+ * getResults() metodunun return type'ını belirler.
  *
  * @author  Ahmet ALTUN
  * @email   ahmet.altun60@gmail.com
@@ -27,17 +28,20 @@ use Zephyr\Database\Relations\Contracts\RelationContract;
 abstract class Relation implements RelationContract
 {
     /**
-     * Parent model instance
+     * Üst model instance
      */
     protected Model $parent;
 
     /**
-     * Related model query builder
+     * İlişkili model query builder
      */
     protected Builder $query;
 
     /**
      * Constructor
+     *
+     * @param Builder $query İlişkili model query'si
+     * @param Model $parent Üst model
      */
     public function __construct(Builder $query, Model $parent)
     {
@@ -46,74 +50,77 @@ abstract class Relation implements RelationContract
     }
 
     /**
-     * Add constraints to query based on relationship
+     * Query'ye kısıtları ekler
      *
-     * Implementation provided by child classes (HasMany, HasOne, BelongsTo).
+     * Alt sınıflar tarafından implement edilir (HasMany, BelongsTo, vb.)
      *
      * @return void
      */
     abstract public function addConstraints(): void;
 
     /**
-     * Add eager loading constraints to query
+     * Eager loading için kısıtları ekler
      *
-     * Implementation provided by child classes.
+     * Alt sınıflar tarafından implement edilir.
      *
-     * @param array<Model> $models Parent models
+     * @param array<Model> $models Üst modeller
      * @return void
      */
     abstract public function addEagerConstraints(array $models): void;
 
     /**
-     * Match eager loaded results to parent models
+     * Eager loading sonuçlarını üst modellerle eşleştirir
      *
-     * Implementation provided by child classes.
+     * Alt sınıflar tarafından implement edilir.
      *
-     * @param array<Model> $models Parent models
-     * @param array<Model> $results Eager loaded results
-     * @param string $relation Relationship name
-     * @return array<Model>
+     * @param array<Model> $models Üst modeller
+     * @param array<Model> $results Eager loading sonuçları
+     * @param string $relation İlişki adı
+     * @return array<Model> İlişkiler yüklenmiş modeller
      */
     abstract public function match(array $models, array $results, string $relation): array;
 
     /**
-     * Eager load and match relationship
+     * Eager loading ve eşleştirme koordinasyonu
      *
-     * This is the main method called during eager loading.
-     * It coordinates the process of loading relationships for multiple models.
+     * Eager loading sırasında çağrılan ana metot.
+     * Süreç:
+     * 1. Eager loading kısıtları ekle
+     * 2. Sonuçları getir
+     * 3. Sonuçları üst modellerle eşleştir
      *
-     * @param array<Model> $models Parent models
-     * @param string $relation Relationship name
-     * @return array<Model> Models with loaded relationships
+     * @param array<Model> $models Üst modeller
+     * @param string $relation İlişki adı
+     * @return array<Model> İlişkiler yüklenmiş modeller
      */
     public function eagerLoadAndMatch(array $models, string $relation): array
     {
-        // Add constraints for eager loading
+        // Eager loading kısıtlarını ekle
         $this->addEagerConstraints($models);
 
-        // Get results
+        // Sonuçları getir
         $results = $this->getEager();
 
-        // Match results to parent models
+        // Sonuçları üst modellerle eşleştir
         return $this->match($models, $results, $relation);
     }
 
     /**
-     * Get eager loading results
+     * Eager loading sonuçlarını getirir
      *
-     * Executes the query and returns all results.
+     * Query'yi çalıştırır ve tüm sonuçları array olarak döndürür.
      *
-     * @return array<Model> Array of related models
+     * @return Collection İlişkili modeller
      */
-    protected function getEager(): array
+    protected function getEager(): Collection
     {
         return $this->query->get();
     }
 
     /**
-     * Get the underlying query builder
+     * Query builder'ı döndürür
      *
-     * @return Builder Query builder instance
+     * @return Builder
      */
     public function getQuery(): Builder
     {
@@ -121,9 +128,9 @@ abstract class Relation implements RelationContract
     }
 
     /**
-     * Get parent model
+     * Üst model'i döndürür
      *
-     * @return Model Parent model instance
+     * @return Model
      */
     public function getParent(): Model
     {
@@ -131,20 +138,20 @@ abstract class Relation implements RelationContract
     }
 
     /**
-     * Forward method calls to query builder
+     * Metot çağrılarını query builder'a forward eder
      *
-     * This allows chaining query methods on the relationship:
+     * Relation üzerinde query builder metotları çağrılabilir:
      * $user->posts()->where('published', true)->get()
      *
-     * @param string $method Method name
-     * @param array $parameters Method parameters
+     * @param string $method Metot adı
+     * @param array $parameters Parametreler
      * @return mixed
      */
     public function __call(string $method, array $parameters): mixed
     {
         $result = $this->query->$method(...$parameters);
 
-        // Return self for chainable methods
+        // Chainable metotlar için self döndür
         if ($result === $this->query) {
             return $this;
         }

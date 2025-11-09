@@ -9,8 +9,15 @@ use RuntimeException;
 /**
  * Model Not Found Exception
  *
- * Thrown when a model cannot be found by primary key.
- * Typically used with findOrFail() methods.
+ * Primary key ile model bulunamadığında fırlatılır.
+ * Genellikle findOrFail() metodu kullanıldığında fırlar.
+ *
+ * Kullanım:
+ * try {
+ *     $user = User::findOrFail($id);
+ * } catch (ModelNotFoundException $e) {
+ *     return response()->json(['error' => 'Kullanıcı bulunamadı'], 404);
+ * }
  *
  * @author  Ahmet ALTUN
  * @email   ahmet.altun60@gmail.com
@@ -19,37 +26,45 @@ use RuntimeException;
 class ModelNotFoundException extends RuntimeException
 {
     /**
-     * Model class name
+     * Model sınıf adı
      */
-    protected string $model;
+    protected string $model = '';
 
     /**
-     * Primary key values
+     * Aranan primary key değerleri
      */
     protected array $ids = [];
 
     /**
-     * Set model class
+     * Model sınıfını set eder
+     *
+     * @param string $model Model sınıf adı
+     * @return self
      */
     public function setModel(string $model): self
     {
         $this->model = $model;
-        $this->message = "No query results for model [{$model}].";
+        $this->message = "Sorgu sonuç bulamadı: [{$model}]";
         return $this;
     }
 
     /**
-     * Set IDs
+     * Primary key değerlerini set eder
+     *
+     * @param array $ids Primary key değerleri
+     * @return self
      */
     public function setIds(array $ids): self
     {
         $this->ids = $ids;
-        $this->message = "No query results for model [{$this->model}] with IDs [" . implode(', ', $ids) . "].";
+        $this->message = "Sorgu sonuç bulamadı: [{$this->model}] - ID: [" . implode(', ', $ids) . "]";
         return $this;
     }
 
     /**
-     * Get model class
+     * Model sınıf adını döndürür
+     *
+     * @return string
      */
     public function getModel(): string
     {
@@ -57,7 +72,9 @@ class ModelNotFoundException extends RuntimeException
     }
 
     /**
-     * Get IDs
+     * Primary key değerlerini döndürür
+     *
+     * @return array
      */
     public function getIds(): array
     {

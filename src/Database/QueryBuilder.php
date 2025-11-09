@@ -10,18 +10,21 @@ use Zephyr\Database\Query\Expression;
 use Zephyr\Support\Collection;
 
 /**
- * Query Builder
+ * SQL Sorgu Oluşturucu
  *
- * Fluent interface for building SQL queries.
- * Provides safe, parameterized queries with method chaining.
+ * Fluent interface ile güvenli SQL sorguları oluşturur.
+ * Prepared statement kullanarak SQL injection'dan korur.
  *
- * Features:
- * - SELECT with columns, joins, where clauses
- * - INSERT, UPDATE, DELETE operations
- * - Aggregates (COUNT, SUM, AVG, MIN, MAX)
+ * Bu sınıf Model'den bağımsızdır ve sadece array döndürür.
+ * Model-aware işlemler için Query\Builder kullanılır.
+ *
+ * Özellikler:
+ * - SELECT, INSERT, UPDATE, DELETE
+ * - WHERE, JOIN, ORDER BY, GROUP BY, HAVING
+ * - Aggregate fonksiyonlar (COUNT, SUM, AVG, MIN, MAX)
  * - Pagination
- * - Transactions
- * - Raw queries
+ * - Transaction
+ * - Chunk processing
  *
  * @author  Ahmet ALTUN
  * @email   ahmet.altun60@gmail.com
@@ -30,7 +33,7 @@ use Zephyr\Support\Collection;
 class QueryBuilder
 {
     /**
-     * Query components
+     * Sorgu bileşenleri
      */
     protected array $columns = ['*'];
     protected ?string $from = null;
@@ -52,9 +55,9 @@ class QueryBuilder
     ) {}
 
     /**
-     * Set columns to select
+     * SELECT sütunlarını belirler
      *
-     * @param string|array|Expression $columns
+     * @param string|array|Expression ...$columns Sütun adları
      * @return self
      *
      * @example
@@ -65,12 +68,14 @@ class QueryBuilder
     public function select(string|array|Expression ...$columns): self
     {
         $this->columns = empty($columns) ? ['*'] : $this->flattenColumns($columns);
-
         return $this;
     }
 
     /**
-     * Add columns to existing selection
+     * Mevcut SELECT'e sütun ekler
+     *
+     * @param string|array|Expression ...$columns
+     * @return self
      */
     public function addSelect(string|array|Expression ...$columns): self
     {
@@ -78,39 +83,30 @@ class QueryBuilder
             $this->columns,
             $this->flattenColumns($columns)
         );
-
         return $this;
     }
 
     /**
-     * Set FROM table
+     * FROM tablosunu belirler
      *
-     * @param string $table Table name
-     * @param string|null $alias Table alias
+     * @param string $table Tablo adı
+     * @param string|null $alias Tablo alias'ı
      * @return self
-     *
-     * @example
-     * $query->from('users');
-     * $query->from('users', 'u');
      */
     public function from(string $table, ?string $alias = null): self
     {
         $this->from = $alias ? "{$table} AS {$alias}" : $table;
-
         return $this;
     }
 
     /**
-     * Add INNER JOIN
+     * INNER JOIN ekler
      *
-     * @param string $table Table to join
-     * @param string $first First column
-     * @param string $operator Comparison operator
-     * @param string $second Second column
+     * @param string $table Join edilecek tablo
+     * @param string $first İlk sütun
+     * @param string $operator Karşılaştırma operatörü
+     * @param string $second İkinci sütun
      * @return self
-     *
-     * @example
-     * $query->join('orders', 'users.id', '=', 'orders.user_id');
      */
     public function join(string $table, string $first, string $operator, string $second): self
     {
@@ -118,7 +114,7 @@ class QueryBuilder
     }
 
     /**
-     * Add LEFT JOIN
+     * LEFT JOIN ekler
      */
     public function leftJoin(string $table, string $first, string $operator, string $second): self
     {
@@ -126,7 +122,7 @@ class QueryBuilder
     }
 
     /**
-     * Add RIGHT JOIN
+     * RIGHT JOIN ekler
      */
     public function rightJoin(string $table, string $first, string $operator, string $second): self
     {
@@ -134,7 +130,7 @@ class QueryBuilder
     }
 
     /**
-     * Add JOIN clause
+     * JOIN clause ekler
      */
     protected function addJoin(string $type, string $table, string $first, string $operator, string $second): self
     {
@@ -145,23 +141,17 @@ class QueryBuilder
             'operator' => $operator,
             'second' => $second,
         ];
-
         return $this;
     }
 
     /**
-     * Add WHERE clause
+     * WHERE koşulu ekler
      *
-     * @param string $column Column name
-     * @param string $operator Comparison operator (=, !=, >, <, >=, <=, LIKE)
-     * @param mixed $value Value to compare
-     * @param string $boolean Boolean operator (AND, OR)
+     * @param string $column Sütun adı
+     * @param string $operator Operatör (=, !=, >, <, >=, <=, LIKE)
+     * @param mixed $value Değer
+     * @param string $boolean Boolean operatör (AND, OR)
      * @return self
-     *
-     * @example
-     * $query->where('status', '=', 'active');
-     * $query->where('age', '>', 18);
-     * $query->where('name', 'LIKE', '%john%');
      */
     public function where(string $column, string $operator, mixed $value, string $boolean = 'AND'): self
     {
@@ -174,12 +164,11 @@ class QueryBuilder
         ];
 
         $this->bindings[] = $value;
-
         return $this;
     }
 
     /**
-     * Add OR WHERE clause
+     * OR WHERE koşulu ekler
      */
     public function orWhere(string $column, string $operator, mixed $value): self
     {
@@ -187,17 +176,17 @@ class QueryBuilder
     }
 
     /**
-     * Add WHERE IN clause
+     * WHERE IN koşulu ekler
      *
-     * @example
-     * $query->whereIn('id', [1, 2, 3]);
+     * @param string $column Sütun adı
+     * @param array $values Değerler
+     * @param string $boolean Boolean operatör
+     * @return self
      */
     public function whereIn(string $column, array $values, string $boolean = 'AND'): self
     {
-        // ✅ Empty array kontrolü
         if (empty($values)) {
-            // Boş array: hiçbir kayıt match etmemeli
-            // WHERE 1 = 0 ekle (always false)
+            // Boş array: hiçbir kayıt eşleşmemeli
             return $this->whereRaw('1 = 0', [], $boolean);
         }
 
@@ -209,25 +198,11 @@ class QueryBuilder
         ];
 
         $this->bindings = array_merge($this->bindings, $values);
-
-        return $this;
-    }
-
-    public function whereRaw(string $sql, array $bindings = [], string $boolean = 'AND'): self
-    {
-        $this->wheres[] = [
-            'type' => 'raw',
-            'sql' => $sql,
-            'boolean' => $boolean,
-        ];
-
-        $this->bindings = array_merge($this->bindings, $bindings);
-
         return $this;
     }
 
     /**
-     * Add OR WHERE IN clause
+     * OR WHERE IN koşulu ekler
      */
     public function orWhereIn(string $column, array $values): self
     {
@@ -235,15 +210,13 @@ class QueryBuilder
     }
 
     /**
-     * Add WHERE NOT IN clause
+     * WHERE NOT IN koşulu ekler
      */
     public function whereNotIn(string $column, array $values, string $boolean = 'AND'): self
     {
-        // ✅ Empty array kontrolü
         if (empty($values)) {
-            // Boş array: tüm kayıtlar match etmeli (NOT IN () = true for all)
-            // WHERE 1 = 1 ekle (always true) veya hiçbir şey ekleme
-            return $this; // No-op, tüm kayıtlar geçerli
+            // Boş array: tüm kayıtlar eşleşmeli
+            return $this;
         }
 
         $this->wheres[] = [
@@ -254,12 +227,11 @@ class QueryBuilder
         ];
 
         $this->bindings = array_merge($this->bindings, $values);
-
         return $this;
     }
 
     /**
-     * Add WHERE NULL clause
+     * WHERE NULL koşulu ekler
      */
     public function whereNull(string $column, string $boolean = 'AND'): self
     {
@@ -268,12 +240,11 @@ class QueryBuilder
             'column' => $column,
             'boolean' => $boolean,
         ];
-
         return $this;
     }
 
     /**
-     * Add WHERE NOT NULL clause
+     * WHERE NOT NULL koşulu ekler
      */
     public function whereNotNull(string $column, string $boolean = 'AND'): self
     {
@@ -282,12 +253,11 @@ class QueryBuilder
             'column' => $column,
             'boolean' => $boolean,
         ];
-
         return $this;
     }
 
     /**
-     * Add WHERE BETWEEN clause
+     * WHERE BETWEEN koşulu ekler
      */
     public function whereBetween(string $column, array $values, string $boolean = 'AND'): self
     {
@@ -299,59 +269,54 @@ class QueryBuilder
         ];
 
         $this->bindings = array_merge($this->bindings, $values);
-
         return $this;
     }
 
     /**
-     * Flatten nested column arrays
+     * Ham WHERE koşulu ekler
+     *
+     * @param string $sql Ham SQL
+     * @param array $bindings Parametreler
+     * @param string $boolean Boolean operatör
+     * @return self
      */
-    protected function flattenColumns(array $columns): array
+    public function whereRaw(string $sql, array $bindings = [], string $boolean = 'AND'): self
     {
-        $flattened = [];
+        $this->wheres[] = [
+            'type' => 'raw',
+            'sql' => $sql,
+            'boolean' => $boolean,
+        ];
 
-        foreach ($columns as $column) {
-            if (is_array($column)) {
-                $flattened = array_merge($flattened, $this->flattenColumns($column));
-            } else {
-                $flattened[] = $column;
-            }
-        }
-
-        return $flattened;
+        $this->bindings = array_merge($this->bindings, $bindings);
+        return $this;
     }
 
     /**
-     * Add ORDER BY clause
+     * ORDER BY ekler
      *
-     * @param string $column Column to order by
-     * @param string $direction ASC or DESC
+     * @param string|Expression $column Sütun
+     * @param string $direction Yön (ASC, DESC)
      * @return self
-     *
-     * @example
-     * $query->orderBy('created_at', 'DESC');
-     * $query->orderBy('name')->orderBy('age', 'DESC');
      */
     public function orderBy(string|Expression $column, string $direction = 'ASC'): self
     {
-        // ✅ Expression ise direkt kullan
         if ($column instanceof Expression) {
             $this->orders[] = [
                 'column' => $column,
-                'direction' => '', // Expression kendi direction'ını içerir
+                'direction' => '',
             ];
             return $this;
         }
 
-        // ✅ String ise validate et
+        // Sütun adı validasyonu
         if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)?$/', $column)) {
-            throw new \InvalidArgumentException("Invalid column name for ORDER BY: {$column}");
+            throw new \InvalidArgumentException("Geçersiz sütun adı: {$column}");
         }
 
         $direction = strtoupper($direction);
-
         if (!in_array($direction, ['ASC', 'DESC'], true)) {
-            throw new \InvalidArgumentException("Invalid direction for ORDER BY: {$direction}");
+            throw new \InvalidArgumentException("Geçersiz sıralama yönü: {$direction}");
         }
 
         $this->orders[] = [
@@ -362,15 +327,16 @@ class QueryBuilder
         return $this;
     }
 
+    /**
+     * Ham ORDER BY ekler
+     */
     public function orderByRaw(string $sql): self
     {
         return $this->orderBy(Expression::make($sql));
     }
 
-
-
     /**
-     * Order by latest (created_at DESC)
+     * En yeniden eskiliye sıralar (created_at DESC)
      */
     public function latest(string $column = 'created_at'): self
     {
@@ -378,7 +344,7 @@ class QueryBuilder
     }
 
     /**
-     * Order by oldest (created_at ASC)
+     * En eskiden yeniye sıralar (created_at ASC)
      */
     public function oldest(string $column = 'created_at'): self
     {
@@ -386,14 +352,7 @@ class QueryBuilder
     }
 
     /**
-     * Add GROUP BY clause
-     *
-     * @param string|array $columns Columns to group by
-     * @return self
-     *
-     * @example
-     * $query->groupBy('status');
-     * $query->groupBy(['department', 'status']);
+     * GROUP BY ekler
      */
     public function groupBy(string|array ...$columns): self
     {
@@ -401,21 +360,11 @@ class QueryBuilder
             $this->groups,
             $this->flattenColumns($columns)
         );
-
         return $this;
     }
 
     /**
-     * Add HAVING clause
-     *
-     * @param string $column Column name
-     * @param string $operator Comparison operator
-     * @param mixed $value Value to compare
-     * @return self
-     *
-     * @example
-     * $query->groupBy('status')
-     *       ->having('COUNT(*)', '>', 10);
+     * HAVING koşulu ekler
      */
     public function having(string $column, string $operator, mixed $value): self
     {
@@ -426,28 +375,20 @@ class QueryBuilder
         ];
 
         $this->havingBindings[] = $value;
-
         return $this;
     }
 
     /**
-     * Set LIMIT
-     *
-     * @param int $limit Maximum number of rows
-     * @return self
-     *
-     * @example
-     * $query->limit(10);
+     * LIMIT belirler
      */
     public function limit(int $limit): self
     {
         $this->limit = $limit > 0 ? $limit : null;
-
         return $this;
     }
 
     /**
-     * Alias for limit()
+     * Limit için alias
      */
     public function take(int $limit): self
     {
@@ -455,23 +396,16 @@ class QueryBuilder
     }
 
     /**
-     * Set OFFSET
-     *
-     * @param int $offset Number of rows to skip
-     * @return self
-     *
-     * @example
-     * $query->offset(20);
+     * OFFSET belirler
      */
     public function offset(int $offset): self
     {
         $this->offset = $offset >= 0 ? $offset : null;
-
         return $this;
     }
 
     /**
-     * Alias for offset()
+     * Offset için alias
      */
     public function skip(int $offset): self
     {
@@ -479,9 +413,9 @@ class QueryBuilder
     }
 
     /**
-     * Build SQL query string
+     * SQL sorgusunu string olarak döndürür
      *
-     * @return string The SQL query
+     * @return string
      */
     public function toSql(): string
     {
@@ -534,96 +468,9 @@ class QueryBuilder
     }
 
     /**
-     * Build columns string
-     */
-    protected function buildColumns(): string
-    {
-        $columns = array_map(function ($column) {
-            if ($column instanceof Expression) {
-                return $column->getValue();
-            }
-            return $column;
-        }, $this->columns);
-
-        return implode(', ', $columns);
-    }
-
-    /**
-     * Build JOINs string
-     */
-    protected function buildJoins(): string
-    {
-        return implode(' ', array_map(function ($join) {
-            return sprintf(
-                '%s JOIN %s ON %s %s %s',
-                $join['type'],
-                $join['table'],
-                $join['first'],
-                $join['operator'],
-                $join['second']
-            );
-        }, $this->joins));
-    }
-
-    /**
-     * Build WHERE clauses
-     */
-    protected function buildWheres(): string
-    {
-        $sql = [];
-
-        foreach ($this->wheres as $i => $where) {
-            $boolean = $i === 0 ? '' : $where['boolean'] . ' ';
-
-            $sql[] = match ($where['type']) {
-                'basic' => $boolean . $where['column'] . ' ' . $where['operator'] . ' ?',
-                'in' => $boolean . $where['column'] . ' IN (' . $this->parameterize($where['values']) . ')',
-                'not_in' => $boolean . $where['column'] . ' NOT IN (' . $this->parameterize($where['values']) . ')',
-                'null' => $boolean . $where['column'] . ' IS NULL',
-                'not_null' => $boolean . $where['column'] . ' IS NOT NULL',
-                'between' => $boolean . $where['column'] . ' BETWEEN ? AND ?',
-                'raw' => $boolean . $where['sql'], // ✅ YENİ
-                default => '',
-            };
-        }
-
-        return implode(' ', $sql);
-    }
-
-    /**
-     * Build HAVING clauses
-     */
-    protected function buildHavings(): string
-    {
-        return implode(' AND ', array_map(function ($having) {
-            return $having['column'] . ' ' . $having['operator'] . ' ?';
-        }, $this->havings));
-    }
-
-    /**
-     * Build ORDER BY string
-     */
-    protected function buildOrders(): string
-    {
-        return implode(', ', array_map(function ($order) {
-            if ($order['column'] instanceof Expression) {
-                return $order['column']->getValue();
-            }
-
-            return $order['column'] . ' ' . $order['direction'];
-        }, $this->orders));
-    }
-
-    /**
-     * Create parameter placeholders
-     */
-    protected function parameterize(array $values): string
-    {
-        return implode(', ', array_fill(0, count($values), '?'));
-    }
-
-    /**
-     * Get all bindings
+     * Sorgudaki tüm binding'leri döndürür
+     *
+     * @return array
      */
     public function getBindings(): array
     {
@@ -631,13 +478,12 @@ class QueryBuilder
     }
 
     /**
-     * Execute query and get all results
+     * Sorguyu çalıştırır ve tüm sonuçları döndürür
      *
-     * @return array Query results
+     * NOT: Bu metot array döndürür. Model nesnesi için Query\Builder kullanın.
+     *
+     * @return array Sonuç satırları
      * @throws DatabaseException
-     *
-     * @example
-     * $users = $query->select('*')->from('users')->get();
      */
     public function get(): Collection
     {
@@ -650,9 +496,10 @@ class QueryBuilder
             $statement->execute($bindings);
 
             return $statement->fetchAll();
+
         } catch (\PDOException $e) {
             throw new DatabaseException(
-                "Query failed: {$e->getMessage()}",
+                "Sorgu hatası: {$e->getMessage()}",
                 (int) $e->getCode(),
                 $e,
                 $sql ?? null,
@@ -662,36 +509,23 @@ class QueryBuilder
     }
 
     /**
-     * Execute query and get first result
+     * İlk sonucu döndürür
      *
-     * Note: Return type is mixed to allow child classes (Model Builder) 
-     * to return specific types (?Model instead of ?array).
-     * This enables covariant return types in the Builder class.
+     * NOT: Bu metot ?array döndürür. Model nesnesi için Query\Builder kullanın.
      *
-     * @return mixed First row as array, Model instance (in Builder), or null
-     *
-     * @example
-     * // In QueryBuilder
-     * $row = DB::table('users')->first();  // Returns ?array
-     * 
-     * // In Model Builder
-     * $user = User::query()->first();  // Returns ?Model
+     * @return array|null
      */
     public function first(): ?Model
     {
         $this->limit(1);
         $results = $this->get();
-
         return $results[0] ?? null;
     }
 
     /**
-     * Get count of results
+     * Kayıt sayısını döndürür
      *
-     * @return int Number of rows
-     *
-     * @example
-     * $count = $query->where('status', '=', 'active')->count();
+     * @return int
      */
     public function count(): int
     {
@@ -699,16 +533,15 @@ class QueryBuilder
         $this->columns = [Expression::make('COUNT(*) as aggregate')];
 
         $result = $this->first();
-
         $this->columns = $original;
 
         return (int) ($result['aggregate'] ?? 0);
     }
 
     /**
-     * Check if any results exist
+     * Sonuç var mı kontrol eder
      *
-     * @return bool True if results exist
+     * @return bool
      */
     public function exists(): bool
     {
@@ -716,7 +549,9 @@ class QueryBuilder
     }
 
     /**
-     * Check if no results exist
+     * Sonuç yok mu kontrol eder
+     *
+     * @return bool
      */
     public function doesntExist(): bool
     {
@@ -724,29 +559,23 @@ class QueryBuilder
     }
 
     /**
-     * Get sum of column
-     *
-     * @param string $column Column to sum
-     * @return float Sum value
-     *
-     * @example
-     * $total = $query->sum('amount');
+     * Sütun toplamını döndürür
      */
     public function sum(string $column): float
     {
-        return $this->aggregate('SUM', $column);
+        return (float) $this->aggregate('SUM', $column);
     }
 
     /**
-     * Get average of column
+     * Sütun ortalamasını döndürür
      */
     public function avg(string $column): float
     {
-        return $this->aggregate('AVG', $column);
+        return (float) $this->aggregate('AVG', $column);
     }
 
     /**
-     * Get minimum value
+     * Minimum değeri döndürür
      */
     public function min(string $column): mixed
     {
@@ -754,7 +583,7 @@ class QueryBuilder
     }
 
     /**
-     * Get maximum value
+     * Maximum değeri döndürür
      */
     public function max(string $column): mixed
     {
@@ -762,7 +591,7 @@ class QueryBuilder
     }
 
     /**
-     * Execute aggregate function
+     * Aggregate fonksiyon çalıştırır
      */
     protected function aggregate(string $function, string $column): mixed
     {
@@ -770,29 +599,22 @@ class QueryBuilder
         $this->columns = [Expression::make("{$function}({$column}) as aggregate")];
 
         $result = $this->first();
-
         $this->columns = $original;
 
         return $result['aggregate'] ?? null;
     }
 
     /**
-     * Insert data into table
+     * INSERT sorgusu çalıştırır
      *
-     * @param array $data Associative array of column => value
-     * @return string|false Last insert ID or false on failure
+     * @param array $data Sütun => Değer
+     * @return string|false Son eklenen ID
      * @throws DatabaseException
-     *
-     * @example
-     * $id = $query->from('users')->insert([
-     *     'name' => 'John Doe',
-     *     'email' => 'john@example.com'
-     * ]);
      */
     public function insert(array $data): string|false
     {
         if (empty($data)) {
-            throw new DatabaseException('Cannot insert empty data');
+            throw new DatabaseException('Boş veri eklenemez');
         }
 
         try {
@@ -812,9 +634,10 @@ class QueryBuilder
             $statement->execute($values);
 
             return $pdo->lastInsertId();
+
         } catch (\PDOException $e) {
             throw new DatabaseException(
-                "Insert failed: {$e->getMessage()}",
+                "INSERT hatası: {$e->getMessage()}",
                 (int) $e->getCode(),
                 $e,
                 $sql ?? null,
@@ -824,16 +647,11 @@ class QueryBuilder
     }
 
     /**
-     * Insert multiple rows
+     * Çoklu INSERT sorgusu
      *
-     * @param array $data Array of associative arrays
-     * @return bool Success status
-     *
-     * @example
-     * $query->insertMultiple([
-     *     ['name' => 'John', 'age' => 30],
-     *     ['name' => 'Jane', 'age' => 25]
-     * ]);
+     * @param array $data Satırlar (array of arrays)
+     * @return bool
+     * @throws \Throwable
      */
     public function insertMultiple(array $data): bool
     {
@@ -850,6 +668,7 @@ class QueryBuilder
 
             $this->connection->commit();
             return true;
+
         } catch (\Throwable $e) {
             $this->connection->rollback();
             throw $e;
@@ -857,20 +676,16 @@ class QueryBuilder
     }
 
     /**
-     * Update rows
+     * UPDATE sorgusu çalıştırır
      *
-     * @param array $data Associative array of column => value
-     * @return int Number of affected rows
+     * @param array $data Güncellenecek veri
+     * @return int Etkilenen satır sayısı
      * @throws DatabaseException
-     *
-     * @example
-     * $affected = $query->where('id', '=', 1)
-     *                   ->update(['status' => 'active']);
      */
     public function update(array $data): int
     {
         if (empty($data)) {
-            throw new DatabaseException('Cannot update with empty data');
+            throw new DatabaseException('Boş veri ile güncelleme yapılamaz');
         }
 
         try {
@@ -878,7 +693,6 @@ class QueryBuilder
             $values = array_values($data);
 
             $set = implode(', ', array_map(fn($col) => "{$col} = ?", $columns));
-
             $sql = "UPDATE {$this->from} SET {$set}";
 
             if (!empty($this->wheres)) {
@@ -891,9 +705,10 @@ class QueryBuilder
             $statement->execute($values);
 
             return $statement->rowCount();
+
         } catch (\PDOException $e) {
             throw new DatabaseException(
-                "Update failed: {$e->getMessage()}",
+                "UPDATE hatası: {$e->getMessage()}",
                 (int) $e->getCode(),
                 $e,
                 $sql ?? null,
@@ -903,13 +718,10 @@ class QueryBuilder
     }
 
     /**
-     * Delete rows
+     * DELETE sorgusu çalıştırır
      *
-     * @return int Number of deleted rows
+     * @return int Silinen satır sayısı
      * @throws DatabaseException
-     *
-     * @example
-     * $deleted = $query->where('status', '=', 'inactive')->delete();
      */
     public function delete(): int
     {
@@ -925,9 +737,10 @@ class QueryBuilder
             $statement->execute($this->bindings);
 
             return $statement->rowCount();
+
         } catch (\PDOException $e) {
             throw new DatabaseException(
-                "Delete failed: {$e->getMessage()}",
+                "DELETE hatası: {$e->getMessage()}",
                 (int) $e->getCode(),
                 $e,
                 $sql ?? null,
@@ -937,20 +750,20 @@ class QueryBuilder
     }
 
     /**
-     * Truncate table
+     * Tabloyu truncate eder
      *
-     * @return bool Success status
+     * @return bool
      */
     public function truncate(): bool
     {
         try {
             $sql = "TRUNCATE TABLE {$this->from}";
             $this->connection->getPdo()->exec($sql);
-
             return true;
+
         } catch (\PDOException $e) {
             throw new DatabaseException(
-                "Truncate failed: {$e->getMessage()}",
+                "TRUNCATE hatası: {$e->getMessage()}",
                 (int) $e->getCode(),
                 $e
             );
@@ -958,40 +771,28 @@ class QueryBuilder
     }
 
     /**
-     * Paginate results
+     * Sayfalama yapar
      *
-     * @param int $page Current page (1-based)
-     * @param int $perPage Items per page
-     * @return array Pagination data
-     *
-     * @example
-     * $result = $query->from('users')->paginate(2, 15);
-     * // [
-     * //   'data' => [...],
-     * //   'total' => 100,
-     * //   'per_page' => 15,
-     * //   'current_page' => 2,
-     * //   'last_page' => 7,
-     * //   'from' => 16,
-     * //   'to' => 30
-     * // ]
+     * @param int $page Sayfa numarası
+     * @param int $perPage Sayfa başına kayıt
+     * @return array Sayfalama verileri
      */
     public function paginate(int $page = 1, int $perPage = 15): array
     {
         $page = max(1, $page);
         $perPage = max(1, $perPage);
 
-        // ✅ Query'yi clone et (count() state'i değiştiriyor)
+        // Query'yi clone et (count() state'i değiştiriyor)
         $countQuery = clone $this;
         $total = $countQuery->count();
 
-        // Calculate pagination
+        // Pagination hesapla
         $lastPage = (int) ceil($total / $perPage);
         $offset = ($page - 1) * $perPage;
         $from = $total > 0 ? $offset + 1 : 0;
         $to = min($offset + $perPage, $total);
 
-        // ✅ Original query'yi kullan
+        // Veriyi çek
         $this->limit($perPage)->offset($offset);
         $data = $this->get();
 
@@ -1006,20 +807,12 @@ class QueryBuilder
         ];
     }
 
-
     /**
-     * Execute callback within transaction
+     * Transaction içinde çalıştırır
      *
-     * @param callable $callback Transaction callback
-     * @return mixed Callback return value
+     * @param callable $callback
+     * @return mixed
      * @throws \Throwable
-     *
-     * @example
-     * $result = $query->transaction(function($query) {
-     *     $query->from('users')->insert(['name' => 'John']);
-     *     $query->from('logs')->insert(['action' => 'user_created']);
-     *     return true;
-     * });
      */
     public function transaction(callable $callback): mixed
     {
@@ -1028,8 +821,8 @@ class QueryBuilder
         try {
             $result = $callback($this);
             $this->connection->commit();
-
             return $result;
+
         } catch (\Throwable $e) {
             $this->connection->rollback();
             throw $e;
@@ -1037,14 +830,11 @@ class QueryBuilder
     }
 
     /**
-     * Execute raw SQL query
+     * Ham SQL çalıştırır
      *
-     * @param string $sql SQL query
-     * @param array $bindings Query bindings
-     * @return array Query results
-     *
-     * @example
-     * $results = $query->raw('SELECT * FROM users WHERE age > ?', [18]);
+     * @param string $sql
+     * @param array $bindings
+     * @return array
      */
     public function raw(string $sql, array $bindings = []): array
     {
@@ -1052,18 +842,11 @@ class QueryBuilder
     }
 
     /**
-     * Process results in chunks
+     * Chunk processing
      *
-     * @param int $size Chunk size
-     * @param callable $callback Callback for each chunk
-     * @return bool Success status
-     *
-     * @example
-     * $query->from('users')->chunk(100, function($users) {
-     *     foreach ($users as $user) {
-     *         // Process user
-     *     }
-     * });
+     * @param int $size Chunk boyutu
+     * @param callable $callback Her chunk için callback
+     * @return bool
      */
     public function chunk(int $size, callable $callback): bool
     {
@@ -1087,7 +870,7 @@ class QueryBuilder
     }
 
     /**
-     * Dump query SQL and bindings
+     * SQL ve binding'leri dump eder
      */
     public function dump(): self
     {
@@ -1095,12 +878,11 @@ class QueryBuilder
             'sql' => $this->toSql(),
             'bindings' => $this->getBindings(),
         ]);
-
         return $this;
     }
 
     /**
-     * Dump query and die
+     * SQL ve binding'leri dump edip çıkar
      */
     public function dd(): never
     {
@@ -1111,34 +893,136 @@ class QueryBuilder
     }
 
     /**
-     * Clone query builder
+     * Nested array'leri düzleştirir
+     */
+    protected function flattenColumns(array $columns): array
+    {
+        $flattened = [];
+
+        foreach ($columns as $column) {
+            if (is_array($column)) {
+                $flattened = array_merge($flattened, $this->flattenColumns($column));
+            } else {
+                $flattened[] = $column;
+            }
+        }
+
+        return $flattened;
+    }
+
+    /**
+     * Sütun string'ini oluşturur
+     */
+    protected function buildColumns(): string
+    {
+        $columns = array_map(static function ($column) {
+            if ($column instanceof Expression) {
+                return $column->getValue();
+            }
+            return $column;
+        }, $this->columns);
+
+        return implode(', ', $columns);
+    }
+
+    /**
+     * JOIN string'ini oluşturur
+     */
+    protected function buildJoins(): string
+    {
+        return implode(' ', array_map(static function ($join) {
+            return sprintf(
+                '%s JOIN %s ON %s %s %s',
+                $join['type'],
+                $join['table'],
+                $join['first'],
+                $join['operator'],
+                $join['second']
+            );
+        }, $this->joins));
+    }
+
+    /**
+     * WHERE clause'larını oluşturur
+     */
+    protected function buildWheres(): string
+    {
+        $sql = [];
+
+        foreach ($this->wheres as $i => $where) {
+            $boolean = $i === 0 ? '' : $where['boolean'] . ' ';
+
+            $sql[] = match ($where['type']) {
+                'basic' => $boolean . $where['column'] . ' ' . $where['operator'] . ' ?',
+                'in' => $boolean . $where['column'] . ' IN (' . $this->parameterize($where['values']) . ')',
+                'not_in' => $boolean . $where['column'] . ' NOT IN (' . $this->parameterize($where['values']) . ')',
+                'null' => $boolean . $where['column'] . ' IS NULL',
+                'not_null' => $boolean . $where['column'] . ' IS NOT NULL',
+                'between' => $boolean . $where['column'] . ' BETWEEN ? AND ?',
+                'raw' => $boolean . $where['sql'],
+                default => '',
+            };
+        }
+
+        return implode(' ', $sql);
+    }
+
+    /**
+     * HAVING clause'larını oluşturur
+     */
+    protected function buildHavings(): string
+    {
+        return implode(' AND ', array_map(function ($having) {
+            return $having['column'] . ' ' . $having['operator'] . ' ?';
+        }, $this->havings));
+    }
+
+    /**
+     * ORDER BY string'ini oluşturur
+     */
+    protected function buildOrders(): string
+    {
+        return implode(', ', array_map(function ($order) {
+            if ($order['column'] instanceof Expression) {
+                return $order['column']->getValue();
+            }
+            return $order['column'] . ' ' . $order['direction'];
+        }, $this->orders));
+    }
+
+    /**
+     * Parametre placeholder'ları oluşturur
+     */
+    protected function parameterize(array $values): string
+    {
+        return implode(', ', array_fill(0, count($values), '?'));
+    }
+
+    /**
+     * Query'yi clone eder
      */
     public function __clone()
     {
-        // Arrays'leri deep clone et (referans kopyalanmasın)
         $this->columns = [...$this->columns];
-        $this->wheres = array_map(function($where) {
-            return is_array($where) ? [...$where] : $where;
-        }, $this->wheres);
+        $this->wheres = array_map(fn($w) => is_array($w) ? [...$w] : $w, $this->wheres);
         $this->bindings = [...$this->bindings];
-        $this->joins = array_map(function($join) {
-            return [...$join];
-        }, $this->joins);
-        $this->orders = array_map(function($order) {
-            return [...$order];
-        }, $this->orders);
+        $this->joins = array_map(fn($j) => [...$j], $this->joins);
+        $this->orders = array_map(fn($o) => [...$o], $this->orders);
         $this->groups = [...$this->groups];
-        $this->havings = array_map(function($having) {
-            return [...$having];
-        }, $this->havings);
+        $this->havings = array_map(fn($h) => [...$h], $this->havings);
         $this->havingBindings = [...$this->havingBindings];
     }
 
     /**
-     * Convert to string (SQL)
+     * String'e çevirir
      */
     public function __toString(): string
     {
         return $this->toSql();
+    }
+
+    public function __call(string $name, array $arguments)
+    {
+
     }
 }

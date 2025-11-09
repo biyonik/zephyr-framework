@@ -10,10 +10,17 @@ use Zephyr\Database\Exception\DatabaseException;
 use Zephyr\Support\Config;
 
 /**
- * Database Connection Manager
+ * Veritabanı Bağlantı Yöneticisi
  *
- * Manages PDO connections with singleton pattern.
- * Provides connection pooling and lazy connection.
+ * PDO bağlantılarını singleton pattern ile yönetir.
+ * Lazy connection ve connection pooling sağlar.
+ *
+ * Özellikler:
+ * - Singleton pattern (tek instance)
+ * - Lazy connection (ihtiyaç anında bağlanır)
+ * - Transaction yönetimi
+ * - Prepared statement desteği
+ * - Otomatik hata yönetimi
  *
  * @author  Ahmet ALTUN
  * @email   ahmet.altun60@gmail.com
@@ -22,40 +29,36 @@ use Zephyr\Support\Config;
 class Connection
 {
     /**
-     * Active PDO connection
+     * Aktif PDO bağlantısı
      */
     protected ?PDO $pdo = null;
 
     /**
-     * Connection configuration
+     * Bağlantı konfigürasyonu
      */
     protected array $config;
 
     /**
-     * Whether to use persistent connections
-     */
-    protected bool $persistent = false;
-
-    /**
-     * Connection instance (singleton)
+     * Singleton instance
      */
     protected static ?self $instance = null;
 
     /**
-     * Constructor
+     * Constructor (private - singleton için)
      */
-    public function __construct(array $config = [])
+    private function __construct(array $config = [])
     {
         $this->config = $config ?: $this->getDefaultConfig();
     }
 
     /**
-     * Get singleton instance
+     * Singleton instance'ı döndürür
+     *
+     * @return self
      */
     public static function getInstance(): self
     {
         if (is_null(self::$instance)) {
-            // ✅ Config'den oku (parametre zorunlu değil)
             $config = [
                 'driver' => Config::get('database.default', 'mysql'),
                 'host' => Config::get('database.connections.mysql.host', '127.0.0.1'),
@@ -74,7 +77,12 @@ class Connection
     }
 
     /**
-     * Get PDO connection (lazy)
+     * PDO bağlantısını döndürür (lazy)
+     *
+     * İlk çağrıda bağlantı kurulur, sonraki çağrılarda cache'den döner.
+     *
+     * @return PDO
+     * @throws DatabaseException
      */
     public function getPdo(): PDO
     {
@@ -86,7 +94,7 @@ class Connection
     }
 
     /**
-     * Establish database connection
+     * Veritabanına bağlanır
      *
      * @throws DatabaseException
      */
@@ -103,15 +111,15 @@ class Connection
                 $options
             );
 
-            // Set error mode to exceptions
+            // Hata modunu exception'a çevir
             $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-            // Set default fetch mode to associative array
+            // Varsayılan fetch modunu associative array yap
             $this->pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 
         } catch (PDOException $e) {
             throw new DatabaseException(
-                "Connection failed: {$e->getMessage()}",
+                "Veritabanı bağlantısı kurulamadı: {$e->getMessage()}",
                 (int) $e->getCode(),
                 $e
             );
@@ -119,7 +127,10 @@ class Connection
     }
 
     /**
-     * Build DSN string
+     * DSN string'ini oluşturur
+     *
+     * @return string
+     * @throws DatabaseException
      */
     protected function buildDsn(): string
     {
@@ -133,31 +144,29 @@ class Connection
             'mysql' => "mysql:host={$host};port={$port};dbname={$database};charset={$charset}",
             'pgsql' => "pgsql:host={$host};port={$port};dbname={$database}",
             'sqlite' => "sqlite:{$database}",
-            default => throw new DatabaseException("Unsupported driver: {$driver}")
+            default => throw new DatabaseException("Desteklenmeyen veritabanı sürücüsü: {$driver}")
         };
     }
 
     /**
-     * Get PDO options
+     * PDO seçeneklerini döndürür
+     *
+     * @return array
      */
     protected function getOptions(): array
     {
-        $options = [
+        return [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_EMULATE_PREPARES => false,
             PDO::ATTR_STRINGIFY_FETCHES => false,
         ];
-
-        if (!empty($this->config['persistent'])) {
-            $options[PDO::ATTR_PERSISTENT] = true;
-        }
-
-        return $options;
     }
 
     /**
-     * Get default configuration from config files
+     * Varsayılan konfigürasyonu döndürür
+     *
+     * @return array
      */
     protected function getDefaultConfig(): array
     {
@@ -169,12 +178,11 @@ class Connection
             'username' => Config::get('database.connections.mysql.username', 'root'),
             'password' => Config::get('database.connections.mysql.password', ''),
             'charset' => Config::get('database.connections.mysql.charset', 'utf8mb4'),
-            'collation' => Config::get('database.connections.mysql.collation', 'utf8mb4_unicode_ci'),
         ];
     }
 
     /**
-     * Disconnect from database
+     * Bağlantıyı kapatır
      */
     public function disconnect(): void
     {
@@ -182,7 +190,7 @@ class Connection
     }
 
     /**
-     * Reconnect to database
+     * Yeniden bağlanır
      */
     public function reconnect(): void
     {
@@ -191,7 +199,9 @@ class Connection
     }
 
     /**
-     * Check if connected
+     * Bağlı mı kontrol eder
+     *
+     * @return bool
      */
     public function isConnected(): bool
     {
@@ -199,7 +209,9 @@ class Connection
     }
 
     /**
-     * Begin transaction
+     * Transaction başlatır
+     *
+     * @return bool
      */
     public function beginTransaction(): bool
     {
@@ -207,7 +219,9 @@ class Connection
     }
 
     /**
-     * Commit transaction
+     * Transaction'ı commit eder
+     *
+     * @return bool
      */
     public function commit(): bool
     {
@@ -215,7 +229,9 @@ class Connection
     }
 
     /**
-     * Rollback transaction
+     * Transaction'ı rollback eder
+     *
+     * @return bool
      */
     public function rollback(): bool
     {
@@ -223,7 +239,9 @@ class Connection
     }
 
     /**
-     * Check if in transaction
+     * Transaction içinde mi kontrol eder
+     *
+     * @return bool
      */
     public function inTransaction(): bool
     {
@@ -231,7 +249,10 @@ class Connection
     }
 
     /**
-     * Get last insert ID
+     * Son eklenen kaydın ID'sini döndürür
+     *
+     * @param string|null $name Sequence adı (PostgreSQL için)
+     * @return string
      */
     public function lastInsertId(?string $name = null): string
     {
@@ -239,8 +260,11 @@ class Connection
     }
 
     /**
-     * Execute raw SQL query
+     * Ham SQL sorgusu çalıştırır (SELECT)
      *
+     * @param string $sql SQL sorgusu
+     * @param array $bindings Parametre değerleri
+     * @return array Sonuç satırları
      * @throws DatabaseException
      */
     public function query(string $sql, array $bindings = []): array
@@ -253,7 +277,7 @@ class Connection
 
         } catch (PDOException $e) {
             throw new DatabaseException(
-                "Query failed: {$e->getMessage()}",
+                "Sorgu hatası: {$e->getMessage()}",
                 (int) $e->getCode(),
                 $e,
                 $sql,
@@ -263,9 +287,11 @@ class Connection
     }
 
     /**
-     * Execute statement (INSERT, UPDATE, DELETE)
+     * Ham SQL statement çalıştırır (INSERT, UPDATE, DELETE)
      *
-     * @return int Number of affected rows
+     * @param string $sql SQL statement
+     * @param array $bindings Parametre değerleri
+     * @return int Etkilenen satır sayısı
      * @throws DatabaseException
      */
     public function statement(string $sql, array $bindings = []): int
@@ -278,7 +304,7 @@ class Connection
 
         } catch (PDOException $e) {
             throw new DatabaseException(
-                "Statement failed: {$e->getMessage()}",
+                "Statement hatası: {$e->getMessage()}",
                 (int) $e->getCode(),
                 $e,
                 $sql,
@@ -288,12 +314,28 @@ class Connection
     }
 
     /**
-     * Get connection configuration (without password)
+     * Konfigürasyonu döndürür (şifre hariç)
+     *
+     * @return array
      */
     public function getConfig(): array
     {
         $config = $this->config;
         unset($config['password']);
         return $config;
+    }
+
+    /**
+     * Clone'u engelle (singleton)
+     */
+    private function __clone() {}
+
+    /**
+     * Unserialize'ı engelle (singleton)
+     * @throws \Exception
+     */
+    public function __wakeup()
+    {
+        throw new \RuntimeException("Singleton sınıfı unserialize edilemez");
     }
 }

@@ -11,13 +11,13 @@ use Zephyr\Support\Collection;
 /**
  * Has Attributes Trait
  *
- * Provides attribute get/set functionality with:
- * - Type casting
- * - Accessor/Mutator methods
+ * Model attribute'larını yönetir:
+ * - Getter/Setter metotları
+ * - Type casting (int, bool, json, date vs.)
+ * - Accessor/Mutator desteği
  * - JSON attribute handling
  * - Date attribute handling
- *
- * (GÜNCELLENDİ - Rapor #1: N+1 Query Problem)
+ * - Attribute önbellekleme
  *
  * @author  Ahmet ALTUN
  * @email   ahmet.altun60@gmail.com
@@ -26,17 +26,22 @@ use Zephyr\Support\Collection;
 trait HasAttributes
 {
     /**
-     * YENİ: Hesaplanmış özellikler için önbellek.
-     * (Rapor #1: N+1 Query Problem)
-     *
+     * Hesaplanmış attribute'lar için önbellek
      * @var array<string, mixed>
      */
     protected array $attributeCache = [];
 
     /**
-     * Get an attribute value
+     * Attribute değerini döndürür
      *
-     * @param string $key Attribute key
+     * Bu metot şu sırada arama yapar:
+     * 1. Önbellek
+     * 2. Yüklenmiş ilişkiler (relations)
+     * 3. Database sütunları (attributes)
+     * 4. İlişki metotları (lazy loading)
+     * 5. Sanal accessor'lar
+     *
+     * @param string $key Attribute adı
      * @return mixed
      */
     public function getAttribute(string $key): mixed
@@ -45,29 +50,28 @@ trait HasAttributes
             return null;
         }
 
-        // 1. Önbellek kontrolü (Mevcut kod - Doğru)
+        // 1. Önbellek kontrolü
         if (array_key_exists($key, $this->attributeCache)) {
             return $this->attributeCache[$key];
         }
 
-        // 2. Yüklenmiş ilişkiler (relations) kontrolü
-        // Bu kontrol HasRelationships trait'inden gelir
+        // 2. Yüklenmiş ilişkiler
         if ($this->relationLoaded($key)) {
             return $this->relations[$key];
         }
 
-        // 3. Veritabanı sütunu (attributes) kontrolü
+        // 3. Database sütunu
         if (array_key_exists($key, $this->attributes)) {
             $value = $this->attributes[$key];
 
-            // Mutator (Accessor) kontrolü
+            // Accessor (Mutator) kontrolü
             if ($this->hasGetMutator($key)) {
                 $mutatedValue = $this->mutateAttribute($key, $value);
                 $this->attributeCache[$key] = $mutatedValue;
                 return $mutatedValue;
             }
 
-            // Cast (Tip Dönüşümü) kontrolü
+            // Cast (Tip dönüşümü) kontrolü
             if ($this->hasCast($key)) {
                 $castValue = $this->castAttribute($key, $value);
                 $this->attributeCache[$key] = $castValue;
@@ -79,19 +83,14 @@ trait HasAttributes
             return $value;
         }
 
-        // 4. İlişki metodu (lazy loading) kontrolü
-        // Bu kontrol HasRelationships trait'inden gelir
+        // 4. İlişki metodu (lazy loading)
         if (method_exists($this, $key)) {
-            // getRelationshipFromMethod() metodu sonucu
-            // $this->relations dizisine ve önbelleğe (attributeCache) eklemelidir.
-            // NOT: getRelationshipFromMethod, sonucu $this->relations'a ekler.
-            // getAttribute'in de bunu $this->attributeCache'e eklemesi gerekir.
             $relationValue = $this->getRelationshipFromMethod($key);
             $this->attributeCache[$key] = $relationValue;
             return $relationValue;
         }
 
-        // 5. Sanal (Virtual) Accessor kontrolü (DB sütunu olmayan)
+        // 5. Sanal accessor (DB sütunu olmayan)
         if ($this->hasGetMutator($key)) {
             $mutatedValue = $this->mutateAttribute($key, null);
             $this->attributeCache[$key] = $mutatedValue;
@@ -101,41 +100,40 @@ trait HasAttributes
         return null;
     }
 
-
     /**
-     * Set an attribute value
+     * Attribute değerini set eder
      *
-     * @param string $key Attribute key
-     * @param mixed $value Attribute value
+     * @param string $key Attribute adı
+     * @param mixed $value Değer
      * @return self
      */
     public function setAttribute(string $key, mixed $value): self
     {
-        // *** YENİ: ÖNBELLEK TEMİZLİĞİ ***
-        // (Rapor #1 Çözümü)
+        // Önbelleği temizle
         unset($this->attributeCache[$key]);
-        // *** YENİ TEMİZLİK SONU ***
 
-        // 1. Check for mutator method (setUserNameAttribute)
-        if ($this->hasSetMutator($key)) { //
+        // 1. Mutator kontrolü (setUserNameAttribute)
+        if ($this->hasSetMutator($key)) {
             return $this->setMutatedAttributeValue($key, $value);
         }
 
-        // 2. Cast value before setting
-        if ($this->hasCast($key)) { //
+        // 2. Cast uygula
+        if ($this->hasCast($key)) {
             $value = $this->castAttributeForStorage($key, $value);
         }
 
-        // 3. Set attribute
-        $this->attributes[$key] = $value; //
+        // 3. Attribute'u set et
+        $this->attributes[$key] = $value;
 
         return $this;
     }
 
     /**
-     * Check if accessor method exists
+     * Accessor metodu var mı kontrol eder
      *
      * @example getUserNameAttribute() for 'user_name'
+     * @param string $key
+     * @return bool
      */
     protected function hasGetMutator(string $key): bool
     {
@@ -144,9 +142,11 @@ trait HasAttributes
     }
 
     /**
-     * Check if mutator method exists
+     * Mutator metodu var mı kontrol eder
      *
      * @example setUserNameAttribute($value) for 'user_name'
+     * @param string $key
+     * @return bool
      */
     protected function hasSetMutator(string $key): bool
     {
@@ -155,7 +155,11 @@ trait HasAttributes
     }
 
     /**
-     * Get attribute value using accessor
+     * Accessor kullanarak attribute değerini döndürür
+     *
+     * @param string $key
+     * @param mixed $value
+     * @return mixed
      */
     protected function mutateAttribute(string $key, mixed $value): mixed
     {
@@ -164,7 +168,11 @@ trait HasAttributes
     }
 
     /**
-     * Set attribute value using mutator
+     * Mutator kullanarak attribute değerini set eder
+     *
+     * @param string $key
+     * @param mixed $value
+     * @return self
      */
     protected function setMutatedAttributeValue(string $key, mixed $value): self
     {
@@ -174,7 +182,10 @@ trait HasAttributes
     }
 
     /**
-     * Check if attribute has cast
+     * Attribute'un cast'i var mı kontrol eder
+     *
+     * @param string $key
+     * @return bool
      */
     protected function hasCast(string $key): bool
     {
@@ -182,7 +193,10 @@ trait HasAttributes
     }
 
     /**
-     * Get cast type for attribute
+     * Cast tipini döndürür
+     *
+     * @param string $key
+     * @return string|null
      */
     protected function getCastType(string $key): ?string
     {
@@ -190,11 +204,11 @@ trait HasAttributes
     }
 
     /**
-     * Cast attribute to native type
+     * Attribute'u belirtilen tipe cast eder (database → PHP)
      *
-     * @param string $key Attribute key
-     * @param mixed $value Raw value from database
-     * @return mixed Casted value
+     * @param string $key
+     * @param mixed $value Database'den gelen ham değer
+     * @return mixed Cast edilmiş değer
      */
     protected function castAttribute(string $key, mixed $value): mixed
     {
@@ -220,11 +234,11 @@ trait HasAttributes
     }
 
     /**
-     * Cast attribute for storage in database
+     * Attribute'u database için cast eder (PHP → database)
      *
-     * @param string $key Attribute key
-     * @param mixed $value Value to store
-     * @return mixed Value ready for database
+     * @param string $key
+     * @param mixed $value
+     * @return mixed
      */
     protected function castAttributeForStorage(string $key, mixed $value): mixed
     {
@@ -238,7 +252,7 @@ trait HasAttributes
             'int', 'integer' => (int) $value,
             'float', 'double' => (float) $value,
             'string' => (string) $value,
-            'bool', 'boolean' => (int) $value, // Store as 0/1
+            'bool', 'boolean' => (int) $value, // 0/1 olarak sakla
             'array', 'json', 'object', 'collection' => $this->asJson($value),
             'date', 'timestamp', 'datetime' => $this->fromDateTime($value),
             default => $value,
@@ -246,7 +260,10 @@ trait HasAttributes
     }
 
     /**
-     * Decode JSON string to array
+     * JSON string'ini array'e çevirir
+     *
+     * @param string $value
+     * @return array
      * @throws \JsonException
      */
     protected function fromJson(string $value): array
@@ -255,7 +272,10 @@ trait HasAttributes
     }
 
     /**
-     * Encode value to JSON string
+     * Değeri JSON string'e çevirir
+     *
+     * @param mixed $value
+     * @return string
      * @throws \JsonException
      */
     protected function asJson(mixed $value): string
@@ -268,7 +288,10 @@ trait HasAttributes
     }
 
     /**
-     * Convert value to DateTime instance
+     * Değeri DateTime instance'ına çevirir
+     *
+     * @param mixed $value
+     * @return DateTime|null
      */
     protected function asDateTime(mixed $value): ?DateTime
     {
@@ -288,7 +311,10 @@ trait HasAttributes
     }
 
     /**
-     * Convert value to date string (Y-m-d)
+     * Değeri date string'e çevirir (Y-m-d)
+     *
+     * @param mixed $value
+     * @return string|null
      */
     protected function asDate(mixed $value): ?string
     {
@@ -296,7 +322,10 @@ trait HasAttributes
     }
 
     /**
-     * Convert value to timestamp
+     * Değeri timestamp'e çevirir
+     *
+     * @param mixed $value
+     * @return int|null
      */
     protected function asTimestamp(mixed $value): ?int
     {
@@ -304,7 +333,10 @@ trait HasAttributes
     }
 
     /**
-     * Convert DateTime to string for storage
+     * DateTime'ı database için string'e çevirir
+     *
+     * @param mixed $value
+     * @return string|null
      */
     protected function fromDateTime(mixed $value): ?string
     {
@@ -328,7 +360,9 @@ trait HasAttributes
     }
 
     /**
-     * Get all attributes as array
+     * Tüm attribute'ları döndürür
+     *
+     * @return array
      */
     public function getAttributes(): array
     {
@@ -336,26 +370,31 @@ trait HasAttributes
     }
 
     /**
-     * Set all attributes at once
+     * Tüm attribute'ları bir seferde set eder
+     *
+     * @param array $attributes
+     * @param bool $sync Orjinal'i senkronize et mi?
+     * @return self
      */
     public function setRawAttributes(array $attributes, bool $sync = false): self
     {
-        $this->attributes = $attributes; //
+        $this->attributes = $attributes;
 
         if ($sync) {
-            $this->syncOriginal(); //
+            $this->syncOriginal();
         }
 
-        // *** YENİ: TÜM ÖNBELLEĞİ TEMİZLE ***
-        // (Rapor #1 Çözümü)
+        // Tüm önbelleği temizle
         $this->clearAttributeCache();
-        // *** YENİ TEMİZLİK SONU ***
 
         return $this;
     }
 
     /**
-     * Get original attribute value
+     * Orjinal attribute değerini döndürür
+     *
+     * @param string|null $key
+     * @return mixed
      */
     public function getOriginal(?string $key = null): mixed
     {
@@ -367,7 +406,10 @@ trait HasAttributes
     }
 
     /**
-     * Get only specified attributes
+     * Sadece belirtilen attribute'ları döndürür
+     *
+     * @param array $attributes
+     * @return array
      */
     public function only(array $attributes): array
     {
@@ -375,15 +417,15 @@ trait HasAttributes
     }
 
     /**
-     * Convert attributes to array
+     * Attribute'ları array'e çevirir
+     *
+     * @return array
      */
     protected function attributesToArray(): array
     {
         $attributes = [];
 
-        // YENİ: $this->attributes yerine array_keys($this->attributes)
-        // kullanarak sadece tanımlı anahtarları çağıralım.
-        // getAttribute() zaten önbellekten hızlıca dönecek.
+        // Tanımlı tüm attribute'ları al
         foreach (array_keys($this->attributes) as $key) {
             $attributes[$key] = $this->getAttribute($key);
         }
@@ -392,7 +434,10 @@ trait HasAttributes
     }
 
     /**
-     * Convert snake_case to StudlyCase
+     * snake_case'i StudlyCase'e çevirir
+     *
+     * @param string $value
+     * @return string
      */
     protected function studly(string $value): string
     {
@@ -402,8 +447,9 @@ trait HasAttributes
     }
 
     /**
-     * YENİ: Hesaplanmış özellik önbelleğini temizler.
-     * (Rapor #1 Çözümü)
+     * Attribute önbelleğini temizler
+     *
+     * @return self
      */
     public function clearAttributeCache(): self
     {

@@ -9,7 +9,15 @@ use RuntimeException;
 /**
  * Mass Assignment Exception
  *
- * Thrown when attempting mass assignment on protected attributes.
+ * Korumalı attribute'lara mass assignment yapılmaya çalışıldığında fırlatılır.
+ * Güvenlik için fillable veya guarded tanımlanmalıdır.
+ *
+ * Çözüm:
+ * class User extends Model {
+ *     protected $fillable = ['name', 'email']; // Whitelist
+ *     // veya
+ *     protected $guarded = ['id', 'is_admin']; // Blacklist
+ * }
  *
  * @author  Ahmet ALTUN
  * @email   ahmet.altun60@gmail.com
@@ -18,22 +26,29 @@ use RuntimeException;
 class MassAssignmentException extends RuntimeException
 {
     /**
-     * Create exception for fillable not set
+     * Fillable property tanımlı değil hatası oluşturur
+     *
+     * @param string $model Model sınıf adı
+     * @return self
      */
     public static function fillableNotSet(string $model): self
     {
         return new self(
-            "Add [fillable] property to enable mass assignment on [{$model}]."
+            "Mass assignment kullanmak için [{$model}] model'inde [fillable] property tanımlayın."
         );
     }
 
     /**
-     * Create exception for guarded attribute
+     * Guarded attribute hatası oluşturur
+     *
+     * @param string $model Model sınıf adı
+     * @param string $key Korumalı attribute adı
+     * @return self
      */
     public static function guardedAttribute(string $model, string $key): self
     {
         return new self(
-            "Attribute [{$key}] is guarded on model [{$model}]."
+            "[{$key}] attribute'u [{$model}] model'inde korumalı (guarded)."
         );
     }
 }

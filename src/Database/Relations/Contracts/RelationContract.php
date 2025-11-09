@@ -9,8 +9,14 @@ use Zephyr\Database\Model;
 /**
  * Relation Contract
  *
- * Base interface for all relationship types.
- * Defines common behavior that all relations must implement.
+ * Tüm ilişki tiplerinin implement etmesi gereken temel arayüz.
+ * Ortak davranışları tanımlar.
+ *
+ * Bu interface'i implement eden sınıflar:
+ * - HasMany (one-to-many)
+ * - BelongsTo (inverse one-to-many)
+ * - HasOne (one-to-one)
+ * - BelongsToMany (many-to-many)
  *
  * @author  Ahmet ALTUN
  * @email   ahmet.altun60@gmail.com
@@ -19,35 +25,58 @@ use Zephyr\Database\Model;
 interface RelationContract
 {
     /**
-     * Add constraints to query based on relationship
+     * İlişkiye göre query'ye kısıtları ekler
      *
-     * This is called when loading a relationship on a single model.
-     * Example: $user->posts() adds WHERE posts.user_id = 1
+     * Lazy loading için kullanılır.
+     * Tek bir model için WHERE clause ekler.
      *
      * @return void
+     *
+     * @example
+     * // HasMany için:
+     * $user->posts() -> WHERE posts.user_id = 1
+     *
+     * // BelongsTo için:
+     * $post->user() -> WHERE users.id = $post->user_id
      */
     public function addConstraints(): void;
 
     /**
-     * Add eager loading constraints to query
+     * Eager loading için query'ye kısıtları ekler
      *
-     * This is called when loading relationships on multiple models.
-     * Example: User::with('posts') adds WHERE posts.user_id IN (1,2,3,...)
+     * Çoklu model için WHERE IN clause ekler.
      *
-     * @param array<Model> $models Parent models
+     * @param array<Model> $models Üst modeller
      * @return void
+     *
+     * @example
+     * // HasMany için:
+     * User::with('posts') -> WHERE posts.user_id IN (1, 2, 3, ...)
+     *
+     * // BelongsTo için:
+     * Post::with('user') -> WHERE users.id IN (1, 2, 3, ...)
      */
     public function addEagerConstraints(array $models): void;
 
     /**
-     * Match eager loaded results to parent models
+     * Eager loading sonuçlarını üst modellerle eşleştirir
      *
-     * Takes the results from eager loading and assigns them to the correct parent models.
+     * Dictionary oluşturarak verimli eşleştirme yapar.
      *
-     * @param array<Model> $models Parent models
-     * @param array<Model> $results Eager loaded results
-     * @param string $relation Relationship name
-     * @return array<Model> Models with matched relationships
+     * @param array<Model> $models Üst modeller
+     * @param array<Model> $results Eager loading sonuçları
+     * @param string $relation İlişki adı
+     * @return array<Model> İlişkiler yüklenmiş modeller
+     *
+     * @example
+     * Input:
+     *   $models = [User(id=1), User(id=2)]
+     *   $results = [Post(user_id=1), Post(user_id=2)]
+     *   $relation = 'posts'
+     *
+     * Output:
+     *   User(id=1)->posts = [Post(user_id=1)]
+     *   User(id=2)->posts = [Post(user_id=2)]
      */
     public function match(array $models, array $results, string $relation): array;
 }
