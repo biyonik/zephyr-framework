@@ -8,13 +8,23 @@ use Zephyr\Core\App;
 use ReflectionClass;
 
 /**
- * Proxy (Vekil) Fabrikası
+ * Proxy (Vekil) Fabrikası - FIX
  *
  * AOP (Aspect) uygulanması gereken sınıflar için
  * dinamik olarak Proxy (Vekil) sınıfları oluşturur.
+ *
+ * @author  Ahmet ALTUN
+ * @email   ahmet.altun60@gmail.com
+ * @github  https://github.com/biyonik
  */
 class ProxyFactory
 {
+    /**
+     * Oluşturulan proxy sınıfları cache'lenir (class name => generated code)
+     * @var array<string, string>
+     */
+    private static array $proxyCache = [];
+
     public function __construct(
         private App $app,
         private AspectManager $aspectManager
@@ -51,62 +61,164 @@ class ProxyFactory
             return $instance;
         }
 
-        // 2. Orijinal sınıfı miras alan (extends) bir anonim sınıf (Proxy) oluştur
-        return new class($instance, $methodsToProxy) extends $instance {
-            private object $originalInstance;
-            private array $proxiedMethods;
+        // 2. Dinamik proxy sınıfı oluştur
+        return $this->buildProxy($instance, $classReflection, $methodsToProxy);
+    }
 
-            // Proxy'nin constructor'ı asıl (orijinal) nesneyi alır
-            public function __construct(object $originalInstance, array $proxiedMethods)
-            {
-                $this->originalInstance = $originalInstance;
-                $this->proxiedMethods = $proxiedMethods;
-            }
+    /**
+     * Dinamik proxy sınıfı oluşturur ve instantiate eder.
+     *
+     * @param object $instance
+     * @param ReflectionClass $classReflection
+     * @param array $methodsToProxy
+     * @return object
+     */
+    private function buildProxy(
+        object $instance,
+        ReflectionClass $classReflection,
+        array $methodsToProxy
+    ): object {
+        $originalClassName = $classReflection->getName();
+        $proxyClassName = $this->generateProxyClassName($originalClassName);
 
+        // Proxy sınıfı daha önce oluşturulduysa, direkt kullan
+        if (!class_exists($proxyClassName, false)) {
+            $this->createProxyClass($proxyClassName, $classReflection, $methodsToProxy);
+        }
+
+        // Proxy sınıfından yeni instance oluştur
+        return new $proxyClassName($instance, $methodsToProxy);
+    }
+
+    /**
+     * Benzersiz proxy sınıf adı oluşturur.
+     */
+    private function generateProxyClassName(string $originalClassName): string
+    {
+        $hash = substr(md5($originalClassName), 0, 8);
+        $safeName = str_replace('\\', '_', $originalClassName);
+        return "Zephyr_AOP_Proxy_{$safeName}_{$hash}";
+    }
+
+    /**
+     * Dinamik olarak proxy sınıfı kodunu oluşturur ve eval ile yükler.
+     *
+     * ⚠️ eval() kullanımı: Sadece framework'ün kendi oluşturduğu,
+     * güvenilir kod için kullanılıyor. Kullanıcı girdisi içermiyor.
+     * @throws \ReflectionException
+     */
+    private function createProxyClass(
+        string $proxyClassName,
+        ReflectionClass $classReflection,
+        array $methodsToProxy
+    ): void {
+        $originalClassName = $classReflection->getName();
+
+        // Namespace'i ayır
+        $namespaceParts = explode('\\', $proxyClassName);
+        $shortClassName = array_pop($namespaceParts);
+        $namespace = 'Zephyr\\AOP\\Generated';
+
+        $code = <<<PHP
+            namespace {$namespace};
+            
             /**
-             * Tüm metot çağrılarını yakalayan sihirli (magic) metot.
-             *
-             * Eğer çağrılan metot ($name) bizim $proxiedMethods listemizdeyse,
-             * onu Aspect Pipeline (işlem hattı) üzerinden çalıştırırız.
-             * Değilse, doğrudan orijinal nesnenin metodunu çağırırız.
+             * Otomatik oluşturulmuş Proxy sınıfı
+             * Orijinal: {$originalClassName}
              */
-            public function __call(string $name, array $arguments): mixed
+            class {$shortClassName} extends \\{$originalClassName}
             {
-                if (!isset($this->proxiedMethods[$name])) {
-                    // Bu metot proxy'lenmiyor, doğrudan orijinali çağır
-                    return $this->originalInstance->$name(...$arguments);
+                private object \$__originalInstance;
+                private array \$__proxiedMethods;
+            
+                public function __construct(object \$originalInstance, array \$proxiedMethods)
+                {
+                    \$this->__originalInstance = \$originalInstance;
+                    \$this->__proxiedMethods = \$proxiedMethods;
+                }
+            
+            PHP;
+
+            // Her proxy'lenecek metot için override oluştur
+            foreach ($methodsToProxy as $methodName => $aspects) {
+                $method = $classReflection->getMethod($methodName);
+
+                // Metot parametrelerini al
+                $params = [];
+                $args = [];
+                foreach ($method->getParameters() as $param) {
+                    $paramStr = '';
+
+                    // Tip kontrolü
+                    if ($param->hasType()) {
+                        $type = $param->getType();
+                        if ($type instanceof \ReflectionNamedType) {
+                            $paramStr .= ($type->allowsNull() ? '?' : '') . $type->getName() . ' ';
+                        }
+                    }
+
+                    $paramStr .= '$' . $param->getName();
+
+                    // Varsayılan değer
+                    if ($param->isDefaultValueAvailable()) {
+                        $default = var_export($param->getDefaultValue(), true);
+                        $paramStr .= " = {$default}";
+                    }
+
+                    $params[] = $paramStr;
+                    $args[] = '$' . $param->getName();
                 }
 
-                // Bu metot proxy'leniyor. Aspect Pipeline'ını kur.
+                $paramsStr = implode(', ', $params);
+                $argsStr = implode(', ', $args);
 
-                // 1. Asıl (orijinal) metodu çağıran son katman
-                $coreLogic = function () use ($name, $arguments) {
-                    return $this->originalInstance->$name(...$arguments);
-                };
+                // Return type
+                $returnType = '';
+                if ($method->hasReturnType()) {
+                    $type = $method->getReturnType();
+                    if ($type instanceof \ReflectionNamedType) {
+                        $returnType = ': ' . ($type->allowsNull() ? '?' : '') . $type->getName();
+                    }
+                }
 
-                // 2. Aspect'leri (Cacheable, Loggable vb.) al
-                $aspects = $this->proxiedMethods[$name];
-                $methodReflection = new \ReflectionMethod($this->originalInstance, $name);
-
-                // 3. Aspect'leri (dıştan içe doğru) bir boru hattı (Pipeline) gibi kur
-                $pipeline = array_reduce(
-                    $aspects, // DİKKAT: AspectManager bunları zaten tersine çevirdi
-                    function ($next, $aspectInfo) use ($methodReflection, $arguments) {
-                        return function () use ($next, $aspectInfo, $methodReflection, $arguments) {
-                            /** @var AspectInterface $aspect */
-                            $aspect = $aspectInfo['aspect'];
-                            $attribute = $aspectInfo['attribute'];
-
-                            // Aspect'in process() metodunu çağır
-                            return $aspect->process($next, $methodReflection, $arguments, $attribute);
+                $code .= <<<PHP
+                
+                    public function {$methodName}({$paramsStr}){$returnType}
+                    {
+                        \$args = [{$argsStr}];
+                        
+                        // Aspect Pipeline'ını kur
+                        \$coreLogic = function () use (\$args) {
+                            return \$this->__originalInstance->{$methodName}(...\$args);
                         };
-                    },
-                    $coreLogic // Pipeline'in en içindeki çekirdek
-                );
-
-                // 4. Kurulan pipeline'ı (bor hattını) çalıştır
-                return $pipeline();
+                
+                        \$methodReflection = new \ReflectionMethod(\$this->__originalInstance, '{$methodName}');
+                        \$aspects = \$this->__proxiedMethods['{$methodName}'];
+                
+                        \$pipeline = array_reduce(
+                            \$aspects,
+                            function (\$next, \$aspectInfo) use (\$methodReflection, \$args) {
+                                return function () use (\$next, \$aspectInfo, \$methodReflection, \$args) {
+                                    \$aspect = \$aspectInfo['aspect'];
+                                    \$attribute = \$aspectInfo['attribute'];
+                                    return \$aspect->process(\$next, \$methodReflection, \$args, \$attribute);
+                                };
+                            },
+                            \$coreLogic
+                        );
+                
+                        return \$pipeline();
+                    }
+                
+                PHP;
             }
-        };
+
+            $code .= "}\n";
+
+        // Proxy sınıfını yükle
+        eval($code);
+
+        // Namespace'li tam adı class_alias ile kaydet
+        class_alias("{$namespace}\\{$shortClassName}", $proxyClassName);
     }
 }
