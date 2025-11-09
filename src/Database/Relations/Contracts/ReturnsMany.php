@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Zephyr\Database\Relations\Contracts;
 
 use Zephyr\Database\Model;
+use Zephyr\Support\Collection;
 
 /**
  * Returns Many Contract
@@ -28,5 +29,5 @@ interface ReturnsMany extends RelationContract
      * @example
      * $user->posts()->getResults() // Returns array of Post models
      */
-    public function getResults(): array;
+    public function getResults(): Collection;
 }

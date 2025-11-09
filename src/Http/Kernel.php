@@ -10,6 +10,8 @@ use Zephyr\Exceptions\Handler as ExceptionHandler;
 use Zephyr\Http\Middleware\AuthMiddleware;
 use Zephyr\Http\Middleware\CorsMiddleware;
 use Zephyr\Http\Middleware\RateLimitMiddleware;
+use Zephyr\Http\Middleware\RequestIdMiddleware;
+use Zephyr\Http\Middleware\ResponseTimeMiddleware;
 use Zephyr\Http\Middleware\SecurityHeadersMiddleware;
 
 /**
@@ -49,7 +51,9 @@ class Kernel
         // \Zephyr\Http\Middleware\TrustedProxies::class,
         CorsMiddleware::class,
         RateLimitMiddleware::class,
-        SecurityHeadersMiddleware::class
+        SecurityHeadersMiddleware::class,
+        RequestIdMiddleware::class,
+        ResponseTimeMiddleware::class
     ];
 
     /**

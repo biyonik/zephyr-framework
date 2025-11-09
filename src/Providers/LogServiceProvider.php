@@ -7,6 +7,7 @@ namespace Zephyr\Providers;
 use Zephyr\Core\App;
 use Zephyr\Logging\LogManager;
 use Psr\Log\LoggerInterface;
+use Zephyr\Logging\Processors\RequestProcessor;
 
 /**
  * Loglama Servis Sağlayıcısı
@@ -32,6 +33,10 @@ class LogServiceProvider
         $this->app->singleton(LogManager::class, function ($app) {
             // LogManager'ın App container'ına ihtiyacı var
             return new LogManager($app);
+        });
+
+        $this->app->singleton(RequestProcessor::class, function ($app) {
+            return new RequestProcessor($app);
         });
 
         // 2. PSR-3 arayüzünü LogManager'a bağla

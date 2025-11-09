@@ -5,13 +5,13 @@ declare(strict_types=1);
 namespace Zephyr\Logging;
 
 use Psr\Log\LoggerInterface;
-use Psr\Log\InvalidArgumentException;
 use Monolog\Logger;
 use Monolog\Handler\StreamHandler;
 use Monolog\Handler\RotatingFileHandler;
 use Monolog\Level;
 use Monolog\Formatter\LineFormatter;
 use Zephyr\Core\App;
+use Zephyr\Logging\Processors\RequestProcessor;
 
 /**
  * Gelişmiş Log Yöneticisi (PSR-3 Uyumlu)
@@ -103,7 +103,11 @@ class LogManager implements LoggerInterface
 
         $handler->setFormatter($this->getDefaultFormatter());
 
-        return new Logger($name, [$handler]);
+        $logger =  new Logger($name, [$handler]);
+
+        $this->pushGlobalProcessors($logger);
+
+        return $logger;
     }
 
     /**
@@ -122,7 +126,12 @@ class LogManager implements LoggerInterface
 
         $handler->setFormatter($this->getDefaultFormatter());
 
-        return new Logger($name, [$handler]);
+
+        $logger =  new Logger($name, [$handler]);
+
+        $this->pushGlobalProcessors($logger);
+
+        return $logger;
     }
 
     /**
@@ -137,7 +146,9 @@ class LogManager implements LoggerInterface
 
         $handler->setFormatter($this->getDefaultFormatter());
 
-        return new Logger($name, [$handler]);
+        $logger =  new Logger($name, [$handler]);
+
+        return $logger;
     }
 
     /**
@@ -155,7 +166,11 @@ class LogManager implements LoggerInterface
             $handlers = array_merge($handlers, $this->channel($channelName)->getHandlers());
         }
 
-        return new Logger($name, $handlers);
+        $logger =  new Logger($name, $handlers);
+
+        $this->pushGlobalProcessors($logger);
+
+        return $logger;
     }
 
     /**
@@ -175,6 +190,12 @@ class LogManager implements LoggerInterface
         $formatter->includeStacktraces(true);
 
         return $formatter;
+    }
+
+    protected function pushGlobalProcessors(Logger $logger): void
+    {
+        // RequestProcessor'ı LogServiceProvider'da kaydetmiştik
+        $logger->pushProcessor($this->app->resolve(RequestProcessor::class));
     }
 
     /**

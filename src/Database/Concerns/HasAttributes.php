@@ -6,6 +6,7 @@ namespace Zephyr\Database\Concerns;
 
 use DateTime;
 use DateTimeInterface;
+use Zephyr\Support\Collection;
 
 /**
  * Has Attributes Trait
@@ -210,7 +211,7 @@ trait HasAttributes
             'bool', 'boolean' => (bool) $value,
             'array', 'json' => $this->fromJson($value),
             'object' => (object) $this->fromJson($value),
-            'collection' => collect($this->fromJson($value)),
+            'collection' => new Collection($this->fromJson($value)),
             'date' => $this->asDate($value),
             'datetime' => $this->asDateTime($value),
             'timestamp' => $this->asTimestamp($value),
@@ -239,23 +240,23 @@ trait HasAttributes
             'string' => (string) $value,
             'bool', 'boolean' => (int) $value, // Store as 0/1
             'array', 'json', 'object', 'collection' => $this->asJson($value),
-            'date' => $this->fromDateTime($value),
-            'datetime' => $this->fromDateTime($value),
-            'timestamp' => $this->fromDateTime($value),
+            'date', 'timestamp', 'datetime' => $this->fromDateTime($value),
             default => $value,
         };
     }
 
     /**
      * Decode JSON string to array
+     * @throws \JsonException
      */
     protected function fromJson(string $value): array
     {
-        return json_decode($value, true) ?? [];
+        return json_decode($value, true, 512, JSON_THROW_ON_ERROR) ?? [];
     }
 
     /**
      * Encode value to JSON string
+     * @throws \JsonException
      */
     protected function asJson(mixed $value): string
     {
@@ -263,7 +264,7 @@ trait HasAttributes
             return $value;
         }
 
-        return json_encode($value);
+        return json_encode($value, JSON_THROW_ON_ERROR);
     }
 
     /**

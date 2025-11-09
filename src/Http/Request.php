@@ -36,7 +36,7 @@ class Request
     /**
      * Request headers
      */
-    protected array $headers = [];
+    public array $headers = [];
 
     /**
      * Query parameters ($_GET)

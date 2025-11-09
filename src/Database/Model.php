@@ -10,6 +10,7 @@ use Zephyr\Database\Exception\ModelNotFoundException;
 use Zephyr\Database\Concerns\HasAttributes;
 use Zephyr\Database\Concerns\HasTimestamps;
 use Zephyr\Database\Concerns\HasRelationships;
+use Zephyr\Support\Collection;
 
 /**
  * Active Record Base Model
@@ -203,6 +204,19 @@ abstract class Model
         return (new Builder($this->getConnection()))
             ->setModel($this)
             ->from($this->getTable());
+    }
+
+    /**
+     * YENİ: Model dizisini bir Koleksiyona dönüştürür.
+     * Bu, alt sınıflar (örn: EloquentCollection) tarafından
+     * override edilebilir.
+     *
+     * @param array<Model> $models
+     * @return Collection
+     */
+    public function newCollection(array $models): Collection
+    {
+        return new Collection($models);
     }
 
     /**

@@ -7,6 +7,7 @@ namespace Zephyr\Database\Query;
 use Zephyr\Database\QueryBuilder;
 use Zephyr\Database\Model;
 use Zephyr\Database\Exception\ModelNotFoundException;
+use Zephyr\Support\Collection;
 
 /**
  * Model Query Builder
@@ -53,17 +54,20 @@ class Builder extends QueryBuilder
     /**
      * Execute query and get model instances
      *
-     * @return array Array of model instances
+     * @return Collection Array of model instances
      */
-    public function get(): array
+    public function get(): Collection
     {
         $results = parent::get();
 
         if (empty($results)) {
-            return [];
+            return $this->model->newCollection([]);
         }
 
-        return $this->hydrate($results);
+        $models = $this->hydrate($results);
+
+        // Modelleri Collection içine al
+        return $this->model->newCollection($models);
     }
 
     /**
@@ -125,10 +129,10 @@ class Builder extends QueryBuilder
      * @param array $columns
      * @return array
      */
-    public function findMany(array $ids, array $columns = ['*']): array
+    public function findMany(array $ids, array $columns = ['*']): Collection
     {
         if (empty($ids)) {
-            return [];
+            return $this->model->newCollection([]);
         }
 
         return $this->select(...$columns)

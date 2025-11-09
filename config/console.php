@@ -9,9 +9,11 @@
 
 use App\Commands\ConfigCacheCommand;
 use App\Commands\ConfigClearCommand;
+use App\Commands\MakeActionCommand;
 use App\Commands\MakeEventCommand;
 use App\Commands\MakeListenerCommand;
 use App\Commands\MakeSeederCommand;
+use App\Commands\StorageLinkCommand;
 use App\Commands\TestCommand;
 use App\Commands\OptimizeContainerCommand;
 use App\Commands\OptimizeRouteCommand;
@@ -43,5 +45,8 @@ return [
     ConfigCacheCommand::class,
     ConfigClearCommand::class,
 
-    MakeSeederCommand::class
+    MakeSeederCommand::class,
+
+    MakeActionCommand::class,
+    StorageLinkCommand::class
 ];

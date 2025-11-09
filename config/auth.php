@@ -8,6 +8,8 @@
  * @github  https://github.com/biyonik
  */
 
+use App\Models\User;
+
 return [
     /*
     |--------------------------------------------------------------------------
@@ -46,6 +48,6 @@ return [
      * Authentication providers
      */
     'provider' => [
-        'model' => \App\Models\User::class,
+        'model' => User::class,
     ]
 ];

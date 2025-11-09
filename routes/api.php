@@ -8,6 +8,8 @@
  * @github  https://github.com/biyonik
  */
 
+use App\Controllers\AuthController;
+use App\Controllers\UserController;
 use Zephyr\Http\{Request, Response};
 use App\Controllers\TestController;
 use Zephyr\Exceptions\Http\NotFoundException;
@@ -89,31 +91,11 @@ $router->get('/test-server-error', function() {
     throw new RuntimeException('Something went wrong!');
 });
 
-$router->post('/login', function(Request $request) {
-    $credentials = $request->only(['email', 'password']);
-    
-    $token = auth()->attempt($credentials);
-    
-    if (!$token) {
-        return Response::error('Geçersiz kimlik bilgileri', 401);
-    }
-    
-    return Response::success(['token' => $token]);
-});
+// Yeni Kullanıcı Kaydı
+$router->post('/register', [AuthController::class, 'register']);
 
-// 2. Korumalı Rota (Middleware Kullanımı)
-$router->get('/me', function() {
-    
-    // Auth helper'ı ile kullanıcıya erişim
-    $userPayload = auth()->user(); 
-    $userId = auth()->id();
+// Kullanıcı Girişi (Refactor edildi)
+$router->post('/login', [AuthController::class, 'login']);
 
-    // Veya middleware'in yüklediği kullanıcıyı DB'den çek
-    // $user = \App\Models\User::find(auth()->id());
-    
-    return Response::success([
-        'message' => 'Giriş başarılı',
-        'user_id' => $userId,
-        'token_payload' => $userPayload
-    ]);
-})->middleware('auth');
+// Korumalı Rota (Refactor edildi)
+$router->get('/me', [UserController::class, 'me'])->middleware('auth');

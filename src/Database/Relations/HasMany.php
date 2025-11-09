@@ -7,6 +7,7 @@ namespace Zephyr\Database\Relations;
 use Zephyr\Database\Query\Builder;
 use Zephyr\Database\Model;
 use Zephyr\Database\Relations\Contracts\ReturnsMany;
+use Zephyr\Support\Collection;
 
 /**
  * Has Many Relation
@@ -190,9 +191,9 @@ class HasMany extends Relation implements ReturnsMany
     /**
      * Get results for relationship
      *
-     * @return array<Model> Array of related models
+     * @return Collection Array of related models
      */
-    public function getResults(): array
+    public function getResults(): Collection
     {
         return $this->query->get();
     }
