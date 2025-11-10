@@ -13,7 +13,7 @@ use Zephyr\Support\Config;
  * Veritabanı Bağlantı Yöneticisi
  *
  * PDO bağlantılarını singleton pattern ile yönetir.
- * Lazy connection ve connection pooling sağlar.
+ * Lazy connection ve transaction yönetimi sağlar.
  *
  * Özellikler:
  * - Singleton pattern (tek instance)
@@ -53,8 +53,6 @@ class Connection
 
     /**
      * Singleton instance'ı döndürür
-     *
-     * @return self
      */
     public static function getInstance(): self
     {
@@ -77,12 +75,30 @@ class Connection
     }
 
     /**
+     * Test için instance'ı set eder
+     * 
+     * ÖNEMLİ: Sadece test ortamında kullanılmalı!
+     */
+    public static function setInstance(?self $instance): void
+    {
+        self::$instance = $instance;
+    }
+
+    /**
+     * Singleton instance'ı sıfırlar
+     * 
+     * ÖNEMLİ: Sadece test ortamında kullanılmalı!
+     */
+    public static function resetInstance(): void
+    {
+        if (self::$instance) {
+            self::$instance->disconnect();
+            self::$instance = null;
+        }
+    }
+
+    /**
      * PDO bağlantısını döndürür (lazy)
-     *
-     * İlk çağrıda bağlantı kurulur, sonraki çağrılarda cache'den döner.
-     *
-     * @return PDO
-     * @throws DatabaseException
      */
     public function getPdo(): PDO
     {
@@ -95,8 +111,6 @@ class Connection
 
     /**
      * Veritabanına bağlanır
-     *
-     * @throws DatabaseException
      */
     protected function connect(): void
     {
@@ -111,10 +125,7 @@ class Connection
                 $options
             );
 
-            // Hata modunu exception'a çevir
             $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-
-            // Varsayılan fetch modunu associative array yap
             $this->pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 
         } catch (PDOException $e) {
@@ -128,9 +139,6 @@ class Connection
 
     /**
      * DSN string'ini oluşturur
-     *
-     * @return string
-     * @throws DatabaseException
      */
     protected function buildDsn(): string
     {
@@ -150,8 +158,6 @@ class Connection
 
     /**
      * PDO seçeneklerini döndürür
-     *
-     * @return array
      */
     protected function getOptions(): array
     {
@@ -165,8 +171,6 @@ class Connection
 
     /**
      * Varsayılan konfigürasyonu döndürür
-     *
-     * @return array
      */
     protected function getDefaultConfig(): array
     {
@@ -179,6 +183,14 @@ class Connection
             'password' => Config::get('database.connections.mysql.password', ''),
             'charset' => Config::get('database.connections.mysql.charset', 'utf8mb4'),
         ];
+    }
+
+    /**
+     * Database adını döndürür
+     */
+    public function getDatabaseName(): string
+    {
+        return $this->config['database'] ?? '';
     }
 
     /**
@@ -200,8 +212,6 @@ class Connection
 
     /**
      * Bağlı mı kontrol eder
-     *
-     * @return bool
      */
     public function isConnected(): bool
     {
@@ -210,8 +220,6 @@ class Connection
 
     /**
      * Transaction başlatır
-     *
-     * @return bool
      */
     public function beginTransaction(): bool
     {
@@ -220,8 +228,6 @@ class Connection
 
     /**
      * Transaction'ı commit eder
-     *
-     * @return bool
      */
     public function commit(): bool
     {
@@ -230,8 +236,6 @@ class Connection
 
     /**
      * Transaction'ı rollback eder
-     *
-     * @return bool
      */
     public function rollback(): bool
     {
@@ -240,8 +244,6 @@ class Connection
 
     /**
      * Transaction içinde mi kontrol eder
-     *
-     * @return bool
      */
     public function inTransaction(): bool
     {
@@ -250,9 +252,6 @@ class Connection
 
     /**
      * Son eklenen kaydın ID'sini döndürür
-     *
-     * @param string|null $name Sequence adı (PostgreSQL için)
-     * @return string
      */
     public function lastInsertId(?string $name = null): string
     {
@@ -261,11 +260,6 @@ class Connection
 
     /**
      * Ham SQL sorgusu çalıştırır (SELECT)
-     *
-     * @param string $sql SQL sorgusu
-     * @param array $bindings Parametre değerleri
-     * @return array Sonuç satırları
-     * @throws DatabaseException
      */
     public function query(string $sql, array $bindings = []): array
     {
@@ -288,11 +282,6 @@ class Connection
 
     /**
      * Ham SQL statement çalıştırır (INSERT, UPDATE, DELETE)
-     *
-     * @param string $sql SQL statement
-     * @param array $bindings Parametre değerleri
-     * @return int Etkilenen satır sayısı
-     * @throws DatabaseException
      */
     public function statement(string $sql, array $bindings = []): int
     {
@@ -314,9 +303,28 @@ class Connection
     }
 
     /**
+     * Sorguları log etmeden çalıştırır (dry run)
+     */
+    public function pretend(callable $callback): array
+    {
+        $queries = [];
+        
+        // Mock PDO oluştur
+        $originalPdo = $this->pdo;
+        
+        try {
+            // Callback'i çalıştır ve sorguları yakala
+            $callback($this);
+            
+        } finally {
+            $this->pdo = $originalPdo;
+        }
+        
+        return $queries;
+    }
+
+    /**
      * Konfigürasyonu döndürür (şifre hariç)
-     *
-     * @return array
      */
     public function getConfig(): array
     {
@@ -332,9 +340,8 @@ class Connection
 
     /**
      * Unserialize'ı engelle (singleton)
-     * @throws \Exception
      */
-    public function __wakeup()
+    public function __wakeup(): never
     {
         throw new \RuntimeException("Singleton sınıfı unserialize edilemez");
     }

@@ -14,9 +14,12 @@ use Zephyr\Database\Relations\BelongsToMany;
  *
  * Model ilişkilerini yönetir:
  * - hasMany: One-to-many ilişkisi
- * - belongsTo: hasMany'nin tersi (inverse)
+ * - belongsTo: Inverse one-to-many
  * - hasOne: One-to-one ilişkisi
  * - belongsToMany: Many-to-many ilişkisi
+ * - Eager loading
+ * - Lazy loading
+ * - Relation counting
  *
  * @author  Ahmet ALTUN
  * @email   ahmet.altun60@gmail.com
@@ -26,28 +29,11 @@ trait HasRelationships
 {
     /**
      * Yüklenmiş ilişkiler
-     * @var array
      */
     protected array $relations = [];
 
     /**
      * One-to-many ilişki tanımlar
-     *
-     * @param string $related İlişkili model sınıfı
-     * @param string|null $foreignKey İlişkili modeldeki foreign key
-     * @param string|null $localKey Bu modeldeki local key
-     * @return HasMany
-     *
-     * @example
-     * class User extends Model {
-     *     public function posts() {
-     *         return $this->hasMany(Post::class);
-     *     }
-     * }
-     *
-     * Kullanım:
-     * $user->posts; // Tüm post'ları döndürür
-     * $user->posts()->where('published', true)->get();
      */
     public function hasMany(
         string $related,
@@ -56,10 +42,7 @@ trait HasRelationships
     ): HasMany {
         $instance = new $related;
 
-        // Default foreign key: user_id
         $foreignKey = $foreignKey ?? $this->getForeignKey();
-
-        // Default local key: id
         $localKey = $localKey ?? $this->getKeyName();
 
         return new HasMany(
@@ -72,21 +55,6 @@ trait HasRelationships
 
     /**
      * Inverse one-to-many ilişki tanımlar
-     *
-     * @param string $related İlişkili model sınıfı
-     * @param string|null $foreignKey Bu modeldeki foreign key
-     * @param string|null $ownerKey İlişkili modeldeki owner key
-     * @return BelongsTo
-     *
-     * @example
-     * class Post extends Model {
-     *     public function user() {
-     *         return $this->belongsTo(User::class);
-     *     }
-     * }
-     *
-     * Kullanım:
-     * $post->user; // User modelini döndürür
      */
     public function belongsTo(
         string $related,
@@ -95,10 +63,7 @@ trait HasRelationships
     ): BelongsTo {
         $instance = new $related;
 
-        // Default foreign key: user_id (metot adından veya related model'den)
         $foreignKey = $foreignKey ?? $this->guessBelongsToForeignKey($related);
-
-        // Default owner key: id
         $ownerKey = $ownerKey ?? $instance->getKeyName();
 
         return new BelongsTo(
@@ -111,21 +76,6 @@ trait HasRelationships
 
     /**
      * One-to-one ilişki tanımlar
-     *
-     * @param string $related İlişkili model sınıfı
-     * @param string|null $foreignKey İlişkili modeldeki foreign key
-     * @param string|null $localKey Bu modeldeki local key
-     * @return HasOne
-     *
-     * @example
-     * class User extends Model {
-     *     public function profile() {
-     *         return $this->hasOne(Profile::class);
-     *     }
-     * }
-     *
-     * Kullanım:
-     * $user->profile; // Profile modelini döndürür
      */
     public function hasOne(
         string $related,
@@ -147,27 +97,6 @@ trait HasRelationships
 
     /**
      * Many-to-many ilişki tanımlar
-     *
-     * @param string $related İlişkili model sınıfı
-     * @param string|null $table Pivot tablo adı
-     * @param string|null $foreignPivotKey Bu modelin pivot'taki foreign key'i
-     * @param string|null $relatedPivotKey İlişkili modelin pivot'taki foreign key'i
-     * @param string|null $parentKey Bu modelin local key'i
-     * @param string|null $relatedKey İlişkili modelin local key'i
-     * @return BelongsToMany
-     *
-     * @example
-     * class User extends Model {
-     *     public function roles() {
-     *         return $this->belongsToMany(Role::class);
-     *     }
-     * }
-     *
-     * Kullanım:
-     * $user->roles; // Tüm rolleri döndürür
-     * $user->roles()->attach(1);
-     * $user->roles()->detach(1);
-     * $user->roles()->sync([1, 2, 3]);
      */
     public function belongsToMany(
         string $related,
@@ -179,19 +108,18 @@ trait HasRelationships
     ): BelongsToMany {
         $instance = new $related;
 
-        // 1. Pivot tablo adını tahmin et (alfabetik sıralama)
-        // Örn: Role ve User -> role_user
-        $parentName = strtolower(class_basename(static::class)); // user
-        $relatedName = strtolower(class_basename($instance)); // role
+        // Pivot tablo adını tahmin et
+        $parentName = strtolower(class_basename(static::class));
+        $relatedName = strtolower(class_basename($instance));
         $models = [$parentName, $relatedName];
         sort($models);
-        $table = $table ?? implode('_', $models); // role_user
+        $table = $table ?? implode('_', $models);
 
-        // 2. Anahtarları tahmin et
-        $foreignPivotKey = $foreignPivotKey ?? $parentName . '_id'; // user_id
-        $relatedPivotKey = $relatedPivotKey ?? $relatedName . '_id'; // role_id
-        $parentKey = $parentKey ?? $this->getKeyName(); // users.id
-        $relatedKey = $relatedKey ?? $instance->getKeyName(); // roles.id
+        // Anahtarları tahmin et
+        $foreignPivotKey = $foreignPivotKey ?? $parentName . '_id';
+        $relatedPivotKey = $relatedPivotKey ?? $relatedName . '_id';
+        $parentKey = $parentKey ?? $this->getKeyName();
+        $relatedKey = $relatedKey ?? $instance->getKeyName();
 
         return new BelongsToMany(
             $instance->newQuery(),
@@ -205,31 +133,7 @@ trait HasRelationships
     }
 
     /**
-     * İlişki değerini döndürür
-     *
-     * @param string $key İlişki metot adı
-     * @return mixed
-     */
-    protected function getRelationValue(string $key): mixed
-    {
-        // Zaten yüklü mü kontrol et
-        if (array_key_exists($key, $this->relations)) {
-            return $this->relations[$key];
-        }
-
-        // İlişkiyi yükle
-        if (method_exists($this, $key)) {
-            return $this->getRelationshipFromMethod($key);
-        }
-
-        return null;
-    }
-
-    /**
      * Metottan ilişkiyi yükler
-     *
-     * @param string $method
-     * @return mixed
      */
     protected function getRelationshipFromMethod(string $method): mixed
     {
@@ -237,15 +141,13 @@ trait HasRelationships
 
         // İlişkiyi çalıştır ve cache'le
         $results = $relation->getResults();
-        $this->relations[$method] = $results;
+        $this->setRelation($method, $results);
 
         return $results;
     }
 
     /**
      * Bu model için foreign key adını döndürür
-     *
-     * @return string Örn: User modeli için 'user_id'
      */
     protected function getForeignKey(): string
     {
@@ -254,9 +156,6 @@ trait HasRelationships
 
     /**
      * BelongsTo için foreign key'i tahmin eder
-     *
-     * @param string $related
-     * @return string
      */
     protected function guessBelongsToForeignKey(string $related): string
     {
@@ -266,10 +165,6 @@ trait HasRelationships
 
     /**
      * İlişki değerini set eder
-     *
-     * @param string $relation
-     * @param mixed $value
-     * @return self
      */
     public function setRelation(string $relation, mixed $value): self
     {
@@ -278,9 +173,16 @@ trait HasRelationships
     }
 
     /**
+     * Belirli bir ilişkiyi kaldırır
+     */
+    public function unsetRelation(string $relation): self
+    {
+        unset($this->relations[$relation]);
+        return $this;
+    }
+
+    /**
      * Tüm yüklenmiş ilişkileri döndürür
-     *
-     * @return array
      */
     public function getRelations(): array
     {
@@ -288,10 +190,7 @@ trait HasRelationships
     }
 
     /**
-     * İlişki önceden döndürülmüş yüklenmiş mi kontrol eder
-     *
-     * @param string $key
-     * @return bool
+     * İlişki önceden yüklenmiş mi?
      */
     public function relationLoaded(string $key): bool
     {
@@ -300,9 +199,6 @@ trait HasRelationships
 
     /**
      * Belirli bir ilişkiyi döndürür
-     *
-     * @param string $key
-     * @return mixed
      */
     public function getRelation(string $key): mixed
     {
@@ -311,14 +207,9 @@ trait HasRelationships
 
     /**
      * İlişkileri eager load eder
-     *
-     * @param array|string $relations
+     * 
+     * @param array|string $relations İlişki adları
      * @return self
-     *
-     * @example
-     * $user->load('posts', 'profile');
-     * $users = User::all();
-     * $users->load('posts');
      */
     public function load(array|string $relations): self
     {
@@ -331,5 +222,81 @@ trait HasRelationships
         }
 
         return $this;
+    }
+
+    /**
+     * Sadece yüklenmemiş ilişkileri yükler
+     * 
+     * @param array|string $relations İlişki adları
+     * @return self
+     */
+    public function loadMissing(array|string $relations): self
+    {
+        $relations = is_string($relations) ? func_get_args() : $relations;
+
+        foreach ($relations as $relation) {
+            if (!$this->relationLoaded($relation)) {
+                $this->load($relation);
+            }
+        }
+
+        return $this;
+    }
+
+    /**
+     * İlişki sayısını yükler (relation_count attribute)
+     * 
+     * @param array|string $relations İlişki adları
+     * @return self
+     */
+    public function loadCount(array|string $relations): self
+    {
+        $relations = is_string($relations) ? func_get_args() : $relations;
+
+        foreach ($relations as $relation) {
+            if (!method_exists($this, $relation)) {
+                continue;
+            }
+
+            $query = $this->$relation();
+            $count = $query->count();
+
+            // relation_count olarak attribute'a ekle
+            $this->attributes[$relation . '_count'] = $count;
+        }
+
+        return $this;
+    }
+
+    /**
+     * Collection için eager loading helper
+     * 
+     * Bu metot Collection'dan çağrılır
+     */
+    public static function loadRelationsForCollection(array $models, array|string $relations): void
+    {
+        if (empty($models)) {
+            return;
+        }
+
+        $relations = is_array($relations) ? $relations : func_get_args();
+        array_shift($relations); // İlk parametre $models
+
+        // İlk model'i al
+        $model = reset($models);
+
+        foreach ($relations as $relation) {
+            // İlişki query'sini al
+            $query = $model->$relation();
+
+            // Eager constraints ekle
+            $query->addEagerConstraints($models);
+
+            // Sonuçları al
+            $results = $query->get();
+
+            // Sonuçları eşleştir
+            $models = $query->match($models, $results->all(), $relation);
+        }
     }
 }

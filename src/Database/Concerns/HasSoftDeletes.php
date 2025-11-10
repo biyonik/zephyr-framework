@@ -14,14 +14,17 @@ use Zephyr\Database\Scopes\SoftDeletingScope;
  * Kayıtlar fiziksel olarak silinmez, deleted_at sütunu set edilir.
  *
  * Özellikler:
- * - delete() metodu deleted_at'i set eder
- * - forceDelete() metodu gerçek silme yapar
- * - restore() metodu silinen kaydı geri yükler
+ * - delete() deleted_at'i set eder
+ * - forceDelete() gerçek silme yapar
+ * - restore() silinen kaydı geri yükler
  * - Global scope ile deleted_at IS NULL otomatik eklenir
- * - withTrashed() scope'u ile silinen kayıtları da görebilirsiniz
+ * - withTrashed() silinen kayıtları da gösterir
+ * - onlyTrashed() sadece silinen kayıtları gösterir
  *
  * Migration'da:
- * $table->softDeletes(); veya $table->timestamp('deleted_at')->nullable();
+ * $table->softDeletes(); 
+ * // veya
+ * $table->timestamp('deleted_at')->nullable();
  *
  * @author  Ahmet ALTUN
  * @email   ahmet.altun60@gmail.com
@@ -36,11 +39,9 @@ trait HasSoftDeletes
 
     /**
      * Trait boot metodu
-     *
+     * 
      * Model boot edildiğinde otomatik çağrılır.
      * SoftDeletingScope global scope'unu ekler.
-     *
-     * @return void
      */
     public static function bootHasSoftDeletes(): void
     {
@@ -49,11 +50,6 @@ trait HasSoftDeletes
 
     /**
      * deleted_at sütun adını döndürür
-     *
-     * Model'de DELETED_AT constant tanımlı ise onu kullanır,
-     * değilse varsayılan 'deleted_at' kullanır.
-     *
-     * @return string
      */
     public function getDeletedAtColumn(): string
     {
@@ -62,13 +58,6 @@ trait HasSoftDeletes
 
     /**
      * Model silinmiş mi kontrol eder
-     *
-     * @return bool
-     *
-     * @example
-     * if ($user->isTrashed()) {
-     *     echo "Bu kullanıcı silinmiş";
-     * }
      */
     public function isTrashed(): bool
     {
@@ -77,13 +66,8 @@ trait HasSoftDeletes
 
     /**
      * Model'i soft delete yapar
-     *
+     * 
      * Fiziksel silme yerine deleted_at sütununu doldurur.
-     *
-     * @return bool
-     *
-     * @example
-     * $user->delete(); // deleted_at = NOW()
      */
     public function delete(): bool
     {
@@ -93,9 +77,12 @@ trait HasSoftDeletes
 
         // deleted_at'i set et
         $this->setAttribute($this->getDeletedAtColumn(), $this->freshTimestamp());
+        
+        // Kaydet
         $saved = $this->save();
 
         if ($saved) {
+            // exists flag'ini false yap
             $this->exists = false;
         }
 
@@ -104,13 +91,8 @@ trait HasSoftDeletes
 
     /**
      * Model'i kalıcı olarak siler (fiziksel silme)
-     *
+     * 
      * Veritabanından tamamen kaldırır, geri getirilemez.
-     *
-     * @return bool
-     *
-     * @example
-     * $user->forceDelete(); // Veritabanından tamamen sil
      */
     public function forceDelete(): bool
     {
@@ -118,7 +100,7 @@ trait HasSoftDeletes
             return false;
         }
 
-        // Global scope olmadan query oluştur
+        // Global scope'ları bypass et
         $query = $this->newQueryWithoutScopes();
 
         $deleted = $query
@@ -135,34 +117,25 @@ trait HasSoftDeletes
 
     /**
      * Soft delete yapılmış model'i geri yükler
-     *
+     * 
      * deleted_at sütununu NULL yapar.
-     *
-     * @return bool
-     *
-     * @example
-     * $user = User::withTrashed()->find(1);
-     * $user->restore(); // deleted_at = NULL
      */
     public function restore(): bool
     {
         // deleted_at'i temizle
         $this->setAttribute($this->getDeletedAtColumn(), null);
+        
+        // exists flag'ini true yap (zaten DB'de var)
         $this->exists = true;
 
+        // Kaydet
         return $this->save();
     }
 
     /**
      * SCOPE: Silinen kayıtları da gösterir
-     *
+     * 
      * Global scope'u devre dışı bırakır.
-     *
-     * @param Builder $query
-     * @return Builder
-     *
-     * @example
-     * User::withTrashed()->get(); // Tüm kayıtlar (silinen dahil)
      */
     public function scopeWithTrashed(Builder $query): Builder
     {
@@ -171,33 +144,31 @@ trait HasSoftDeletes
 
     /**
      * SCOPE: Sadece silinen kayıtları gösterir
-     *
-     * @param Builder $query
-     * @return Builder
-     *
-     * @example
-     * User::onlyTrashed()->get(); // Sadece silinmiş kayıtlar
      */
     public function scopeOnlyTrashed(Builder $query): Builder
     {
-        return $query->withoutGlobalScope(SoftDeletingScope::class)
+        return $query
+            ->withoutGlobalScope(SoftDeletingScope::class)
             ->whereNotNull($this->getDeletedAtColumn());
     }
 
     /**
      * SCOPE: Silinen kayıtları hariç tutar
-     *
+     * 
      * Zaten varsayılan davranış budur (global scope sayesinde).
-     * Bu metot açıkça çağrılabilir.
-     *
-     * @param Builder $query
-     * @return Builder
-     *
-     * @example
-     * User::withoutTrashed()->get(); // Aktif kayıtlar
      */
     public function scopeWithoutTrashed(Builder $query): Builder
     {
         return $query->whereNull($this->getDeletedAtColumn());
+    }
+
+    /**
+     * Query builder için trashed kontrolü
+     * 
+     * Model instance yerine query üzerinden kontrol edilebilir.
+     */
+    public static function allTrashed(): Builder
+    {
+        return (new static)->onlyTrashed();
     }
 }

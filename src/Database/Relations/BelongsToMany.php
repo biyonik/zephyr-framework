@@ -10,82 +10,16 @@ use Zephyr\Database\Relations\Contracts\ReturnsMany;
 use Zephyr\Support\Collection;
 use Zephyr\Database\QueryBuilder;
 
-/**
- * Belongs To Many Relation
- *
- * Many-to-many ilişkisini temsil eder (Bir kullanıcının birden fazla rolü,
- * bir rolün birden fazla kullanıcısı var).
- *
- * Pivot tablo kullanır (örn: role_user).
- *
- * Kullanım:
- * class User extends Model {
- *     public function roles() {
- *         return $this->belongsToMany(Role::class);
- *     }
- * }
- *
- * Çağırma:
- * $user->roles; // Collection<Role>
- * $user->roles()->attach(1);
- * $user->roles()->detach(1);
- * $user->roles()->sync([1, 2, 3]);
- *
- * Pivot Attributes:
- * $user->roles->first()->pivot->created_at;
- *
- * @author  Ahmet ALTUN
- * @email   ahmet.altun60@gmail.com
- * @github  https://github.com/biyonik
- */
 class BelongsToMany extends Relation implements ReturnsMany
 {
-    /**
-     * Pivot tablo adı
-     */
     protected string $table;
-
-    /**
-     * Üst modelin pivot'taki foreign key'i (örn: 'user_id')
-     */
     protected string $foreignPivotKey;
-
-    /**
-     * İlişkili modelin pivot'taki foreign key'i (örn: 'role_id')
-     */
     protected string $relatedPivotKey;
-
-    /**
-     * Üst modelin local key'i (örn: 'id')
-     */
     protected string $parentKey;
-
-    /**
-     * İlişkili modelin local key'i (örn: 'id')
-     */
     protected string $relatedKey;
-
-    /**
-     * Pivot'tan alınacak ekstra sütunlar
-     */
     protected array $pivotColumns = [];
-
-    /**
-     * Pivot'ta timestamps var mı?
-     */
     protected bool $withTimestamps = false;
 
-    /**
-     * Constructor
-     *
-     * @param Builder $query İlişkili model query'si
-     * @param Model $parent Üst model
-     * @param string $table Pivot tablo adı
-     * @param string $foreignPivotKey Üst modelin pivot key'i
-     * @param string $relatedPivotKey İlişkili modelin pivot key'i
-     * @param string $parentKey Üst modelin local key'i
-     * @param string $relatedKey İlişkili modelin local key'i
-     */
     public function __construct(
         Builder $query,
         Model $parent,
@@ -106,11 +40,6 @@ class BelongsToMany extends Relation implements ReturnsMany
         $this->addConstraints();
     }
 
-    /**
-     * Query'ye kısıtları ekler (tek model için - lazy loading)
-     *
-     * @return void
-     */
     public function addConstraints(): void
     {
         $this->performJoin();
@@ -122,12 +51,6 @@ class BelongsToMany extends Relation implements ReturnsMany
         );
     }
 
-    /**
-     * Eager loading için kısıtları ekler
-     *
-     * @param array<Model> $models
-     * @return void
-     */
     public function addEagerConstraints(array $models): void
     {
         $this->performJoin();
@@ -142,24 +65,16 @@ class BelongsToMany extends Relation implements ReturnsMany
         );
     }
 
-    /**
-     * İlişkili sorgu için JOIN ve SELECT oluşturur
-     *
-     * @return void
-     */
     protected function performJoin(): void
     {
         $relatedTable = $this->query->getModel()?->getTable();
 
-        // Ana SELECT: 'roles.*'
         $this->query->select($relatedTable . '.*');
 
-        // Pivot sütunlarını SELECT'e ekle
         foreach ($this->aliasedPivotColumns() as $pivotSelect) {
             $this->query->addSelect(\Zephyr\Database\Query\Expression::make($pivotSelect));
         }
 
-        // JOIN pivot table
         $this->query->join(
             $this->table,
             $relatedTable . '.' . $this->relatedKey,
@@ -168,20 +83,9 @@ class BelongsToMany extends Relation implements ReturnsMany
         );
     }
 
-    /**
-     * Eager loading sonuçlarını üst modellerle eşleştirir
-     *
-     * @param array<Model> $models Üst modeller
-     * @param array<Model> $results İlişkili modeller
-     * @param string $relation İlişki adı
-     * @return array<Model>
-     */
     public function match(array $models, array $results, string $relation): array
     {
-        // Pivot attributes'leri extract et
         $results = $this->hydratePivotRelation($results);
-
-        // Sonuçları pivot key'e göre grupla
         $dictionary = $this->buildDictionary($results);
 
         foreach ($models as $model) {
@@ -198,31 +102,22 @@ class BelongsToMany extends Relation implements ReturnsMany
         return $models;
     }
 
-    /**
-     * Pivot attributes'leri ayıklar ve modellere ekler
-     *
-     * @param array<Model> $results
-     * @return array<Model>
-     */
     protected function hydratePivotRelation(array $results): array
     {
         foreach ($results as $model) {
             $pivotAttributes = [];
 
-            // 'pivot_' ile başlayan attribute'ları bul
             $attributes = $model->getAttributes();
 
             foreach ($attributes as $key => $value) {
                 if (str_starts_with($key, 'pivot_')) {
-                    $pivotKey = substr($key, 6); // 'pivot_' prefix'ini kaldır
+                    $pivotKey = substr($key, 6);
                     $pivotAttributes[$pivotKey] = $value;
 
-                    // Model attribute'undan kaldır
                     unset($model->$key);
                 }
             }
 
-            // Pivot object'i oluştur
             if (!empty($pivotAttributes)) {
                 $model->setRelation('pivot', (object) $pivotAttributes);
             }
@@ -231,18 +126,11 @@ class BelongsToMany extends Relation implements ReturnsMany
         return $results;
     }
 
-    /**
-     * Sonuçları pivot key'e göre dictionary oluşturur
-     *
-     * @param array<Model> $results
-     * @return array
-     */
     protected function buildDictionary(array $results): array
     {
         $dictionary = [];
 
         foreach ($results as $result) {
-            // Pivot'tan foreign key'i al
             $pivotData = $result->getRelation('pivot');
             $key = $pivotData->{$this->foreignPivotKey} ?? null;
 
@@ -260,11 +148,6 @@ class BelongsToMany extends Relation implements ReturnsMany
         return $dictionary;
     }
 
-    /**
-     * İlişki sonuçlarını döndürür
-     *
-     * @return Collection
-     */
     public function getResults(): Collection
     {
         $results = $this->query->get();
@@ -274,45 +157,22 @@ class BelongsToMany extends Relation implements ReturnsMany
         );
     }
 
-    /**
-     * Pivot'tan alınacak ekstra sütunları belirler
-     *
-     * @param array $columns Sütun adları
-     * @return self
-     *
-     * @example
-     * $user->roles()->withPivot(['expires_at', 'is_active'])->get();
-     */
     public function withPivot(array $columns): self
     {
         $this->pivotColumns = array_merge($this->pivotColumns, $columns);
 
-        // Query'yi yeniden oluştur
         $this->query = $this->query->getModel()?->newQuery();
         $this->addConstraints();
 
         return $this;
     }
 
-    /**
-     * Pivot'a timestamps ekler (created_at, updated_at)
-     *
-     * @return self
-     *
-     * @example
-     * $user->roles()->withTimestamps()->get();
-     */
     public function withTimestamps(): self
     {
         $this->withTimestamps = true;
         return $this->withPivot(['created_at', 'updated_at']);
     }
 
-    /**
-     * Pivot sütunlarını alias ile formatlar
-     *
-     * @return array
-     */
     protected function aliasedPivotColumns(): array
     {
         $aliased = [
@@ -327,23 +187,8 @@ class BelongsToMany extends Relation implements ReturnsMany
         return array_unique($aliased);
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | PİVOT YÖNETİM METOTLARI
-    |--------------------------------------------------------------------------
-    */
-
     /**
-     * Pivot tabloya ilişki ekler (attach)
-     *
-     * @param mixed $id Tek ID veya ID array'i
-     * @param array $attributes Pivot attribute'ları
-     * @return void
-     *
-     * @example
-     * $user->roles()->attach(1);
-     * $user->roles()->attach([1, 2, 3]);
-     * $user->roles()->attach(1, ['expires_at' => '2025-12-31']);
+     * Pivot tabloya ilişki ekler
      */
     public function attach(mixed $id, array $attributes = []): void
     {
@@ -353,22 +198,20 @@ class BelongsToMany extends Relation implements ReturnsMany
 
         foreach ($ids as $relatedId) {
             $record = $this->createPivotRecord($relatedId, $attributes, $now);
-            $records[] = $record;
+            
+            // Duplicate kontrolü
+            if (!$this->pivotRecordExists($relatedId)) {
+                $records[] = $record;
+            }
         }
 
-        $this->newPivotQuery()->insertMultiple($records);
+        if (!empty($records)) {
+            $this->newPivotQuery()->insertMultiple($records);
+        }
     }
 
     /**
-     * Pivot tablodan ilişkiyi kaldırır (detach)
-     *
-     * @param mixed|null $id Tek ID, ID array'i veya null (hepsini sil)
-     * @return int Silinen satır sayısı
-     *
-     * @example
-     * $user->roles()->detach(1); // Tek rol
-     * $user->roles()->detach([1, 2]); // Çoklu rol
-     * $user->roles()->detach(); // Tüm roller
+     * Pivot tablodan ilişkiyi kaldırır
      */
     public function detach(mixed $id = null): int
     {
@@ -383,25 +226,16 @@ class BelongsToMany extends Relation implements ReturnsMany
     }
 
     /**
-     * İlişkileri senkronize eder (sync)
-     *
-     * Mevcut ilişkileri verilen listeyeuygun hale getirir.
-     * Fazla olanları siler, eksik olanları ekler.
-     *
-     * @param array $ids ID array'i
-     * @return array Değişiklik raporu
-     *
-     * @example
-     * $changes = $user->roles()->sync([1, 2, 3]);
-     * // ['attached' => [1, 3], 'detached' => [4], 'updated' => []]
+     * İlişkileri senkronize eder
      */
     public function sync(array $ids): array
     {
         $current = $this->getCurrentPivotIds();
         $new = $this->formatSyncIds($ids);
 
-        $toAttach = array_diff_key($new, $current);
+        // Önce detach, sonra attach (sıra önemli!)
         $toDetach = array_diff_key($current, $new);
+        $toAttach = array_diff_key($new, $current);
 
         $results = [
             'attached' => [],
@@ -409,27 +243,28 @@ class BelongsToMany extends Relation implements ReturnsMany
             'updated' => [],
         ];
 
-        if (count($toAttach) > 0) {
-            $this->attach(array_keys($toAttach), []);
-            $results['attached'] = array_keys($toAttach);
-        }
-
         if (count($toDetach) > 0) {
             $this->detach(array_keys($toDetach));
             $results['detached'] = array_keys($toDetach);
         }
 
+        if (count($toAttach) > 0) {
+            foreach ($toAttach as $id => $attributes) {
+                $this->attach($id, $attributes);
+            }
+            $results['attached'] = array_keys($toAttach);
+        }
+
         return $results;
     }
 
-    /**
-     * Pivot kaydı oluşturur
-     *
-     * @param mixed $relatedId İlişkili model ID
-     * @param array $attributes Ekstra attribute'lar
-     * @param string $now Timestamp
-     * @return array
-     */
+    protected function pivotRecordExists(mixed $relatedId): bool
+    {
+        return $this->newPivotQuery()
+            ->where($this->relatedPivotKey, '=', $relatedId)
+            ->exists();
+    }
+
     protected function createPivotRecord(mixed $relatedId, array $attributes, string $now): array
     {
         $record = [
@@ -445,11 +280,6 @@ class BelongsToMany extends Relation implements ReturnsMany
         return array_merge($record, $attributes);
     }
 
-    /**
-     * Mevcut pivot ID'lerini döndürür
-     *
-     * @return array
-     */
     protected function getCurrentPivotIds(): array
     {
         $results = $this->newPivotQuery()
@@ -464,12 +294,6 @@ class BelongsToMany extends Relation implements ReturnsMany
         return $ids;
     }
 
-    /**
-     * Sync ID'lerini formatlar
-     *
-     * @param array $ids
-     * @return array
-     */
     protected function formatSyncIds(array $ids): array
     {
         $formatted = [];
@@ -483,11 +307,6 @@ class BelongsToMany extends Relation implements ReturnsMany
         return $formatted;
     }
 
-    /**
-     * Pivot tablo için query oluşturur
-     *
-     * @return QueryBuilder
-     */
     protected function newPivotQuery(): QueryBuilder
     {
         $query = new QueryBuilder($this->query->getModel()?->getConnection());

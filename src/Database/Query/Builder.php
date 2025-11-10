@@ -12,15 +12,8 @@ use Zephyr\Support\Collection;
 /**
  * Model-Aware Query Builder
  *
- * QueryBuilder'ı extends ederek Model nesneleri döndürür.
- * Array yerine Model instance'ları ile çalışır.
- *
- * Özellikler:
- * - Model hydration (array → Model dönüşümü)
- * - Eager loading (with)
- * - Query scopes
- * - Global scopes
- * - Collection döndürme
+ * QueryBuilder'ı extends eder AMA override YAPMAZ!
+ * Farklı metot adları kullanır: getModels(), firstModel() gibi
  *
  * @author  Ahmet ALTUN
  * @email   ahmet.altun60@gmail.com
@@ -28,51 +21,28 @@ use Zephyr\Support\Collection;
  */
 class Builder extends QueryBuilder
 {
-    /**
-     * Sorgulanacak model
-     */
     protected ?Model $model = null;
-
-    /**
-     * Eager load edilecek ilişkiler
-     */
     protected array $eagerLoad = [];
-
-    /**
-     * Devre dışı bırakılmış global scope'lar
-     */
     protected array $removedScopes = [];
 
-    /**
-     * Model'i set eder
-     *
-     * @param Model $model
-     * @return self
-     */
     public function setModel(Model $model): self
     {
         $this->model = $model;
         return $this;
     }
 
-    /**
-     * Model instance'ını döndürür
-     *
-     * @return Model|null
-     */
     public function getModel(): ?Model
     {
         return $this->model;
     }
 
     /**
-     * Sorguyu çalıştırır ve Model Collection döndürür
-     *
-     * @return Collection Model collection
+     * Model Collection döndürür
+     * Parent'ın get() metodunu OVERRIDE ETMİYORUZ!
      */
-    public function get(): Collection
+    public function getModels(): Collection
     {
-        $results = parent::get(); // array döner
+        $results = parent::get(); // array
 
         if (empty($results)) {
             return $this->model->newCollection([]);
@@ -84,12 +54,11 @@ class Builder extends QueryBuilder
 
     /**
      * İlk modeli döndürür
-     *
-     * @return Model|null
+     * Parent'ın first() metodunu OVERRIDE ETMİYORUZ!
      */
-    public function first(): ?Model
+    public function firstModel(): ?Model
     {
-        $result = parent::first(); // ?array döner
+        $result = parent::first(); // ?array
 
         if (is_null($result)) {
             return null;
@@ -101,25 +70,16 @@ class Builder extends QueryBuilder
 
     /**
      * Primary key ile model bulur
-     *
-     * @param mixed $id Primary key değeri
-     * @param array $columns Seçilecek sütunlar
-     * @return Model|null
      */
     public function find(mixed $id, array $columns = ['*']): ?Model
     {
         return $this->select(...$columns)
             ->where($this->model->getKeyName(), '=', $id)
-            ->first();
+            ->firstModel();
     }
 
     /**
      * Model bulamazsa exception fırlatır
-     *
-     * @param mixed $id
-     * @param array $columns
-     * @return Model
-     * @throws ModelNotFoundException
      */
     public function findOrFail(mixed $id, array $columns = ['*']): Model
     {
@@ -135,11 +95,7 @@ class Builder extends QueryBuilder
     }
 
     /**
-     * Çoklu primary key ile modelleri bulur
-     *
-     * @param array $ids
-     * @param array $columns
-     * @return Collection
+     * Çoklu ID ile modelleri bulur
      */
     public function findMany(array $ids, array $columns = ['*']): Collection
     {
@@ -149,14 +105,57 @@ class Builder extends QueryBuilder
 
         return $this->select(...$columns)
             ->whereIn($this->model->getKeyName(), $ids)
-            ->get();
+            ->getModels();
+    }
+
+    /**
+     * Bul veya yeni instance oluştur (kaydetmeden)
+     */
+    public function firstOrNew(array $attributes = [], array $values = []): Model
+    {
+        $instance = $this->whereArray($attributes)->firstModel();
+
+        if (!is_null($instance)) {
+            return $instance;
+        }
+
+        return $this->model->newInstance(array_merge($attributes, $values));
+    }
+
+    /**
+     * Bul veya oluştur ve kaydet
+     */
+    public function firstOrCreate(array $attributes = [], array $values = []): Model
+    {
+        $instance = $this->whereArray($attributes)->firstModel();
+
+        if (!is_null($instance)) {
+            return $instance;
+        }
+
+        $instance = $this->model->newInstance(array_merge($attributes, $values));
+        $instance->save();
+
+        return $instance;
+    }
+
+    /**
+     * Güncelle veya oluştur
+     */
+    public function updateOrCreate(array $attributes, array $values = []): Model
+    {
+        $instance = $this->whereArray($attributes)->firstModel();
+
+        if (!is_null($instance)) {
+            $instance->fill($values)->save();
+            return $instance;
+        }
+
+        return $this->firstOrCreate($attributes, $values);
     }
 
     /**
      * Model oluşturur ve kaydeder
-     *
-     * @param array $values
-     * @return Model
      */
     public function create(array $values): Model
     {
@@ -173,31 +172,20 @@ class Builder extends QueryBuilder
 
     /**
      * INSERT yapar ve ID döndürür
-     *
-     * @param array $values
-     * @return string
      */
-    public function insertGetId(array $values): string
+    public function insertGetId(array $values): int|string
     {
-        return $this->insert($values);
+        return parent::insert($values);
     }
 
     /**
      * Eager loading için ilişkileri belirler
-     *
-     * @param array|string $relations
-     * @return self
-     *
-     * @example
-     * User::with('posts', 'profile')->get();
-     * User::with(['posts' => fn($q) => $q->where('published', true)])->get();
      */
     public function with(array|string $relations): self
     {
         $relations = is_string($relations) ? func_get_args() : $relations;
 
         foreach ($relations as $name => $constraints) {
-            // Basit string relation
             if (is_numeric($name)) {
                 $name = $constraints;
                 $constraints = null;
@@ -211,9 +199,6 @@ class Builder extends QueryBuilder
 
     /**
      * Global scope'u devre dışı bırakır
-     *
-     * @param string|array $scopes Scope sınıf adı(ları)
-     * @return self
      */
     public function withoutGlobalScope(string|array $scopes): self
     {
@@ -228,8 +213,6 @@ class Builder extends QueryBuilder
 
     /**
      * Tüm global scope'ları devre dışı bırakır
-     *
-     * @return self
      */
     public function withoutGlobalScopes(): self
     {
@@ -237,23 +220,11 @@ class Builder extends QueryBuilder
         return $this;
     }
 
-    /**
-     * Global scope devre dışı mı kontrol eder
-     *
-     * @param string $scope
-     * @return bool
-     */
     protected function scopeIsRemoved(string $scope): bool
     {
         return isset($this->removedScopes['*']) || isset($this->removedScopes[$scope]);
     }
 
-    /**
-     * Model'leri eager load eder
-     *
-     * @param array $models
-     * @return array
-     */
     protected function eagerLoadRelations(array $models): array
     {
         foreach ($this->eagerLoad as $name => $constraints) {
@@ -263,45 +234,27 @@ class Builder extends QueryBuilder
         return $models;
     }
 
-    /**
-     * Tek bir ilişkiyi eager load eder
-     *
-     * @param array $models
-     * @param string $name İlişki adı
-     * @param callable|null $constraints Query constraints
-     * @return array
-     */
     protected function eagerLoadRelation(array $models, string $name, ?callable $constraints): array
     {
         if (empty($models)) {
             return $models;
         }
 
-        // İlk model'den relation instance al
         $relation = $models[0]->$name();
 
-        // Constraint'leri uygula
         if (!is_null($constraints)) {
             $constraints($relation);
         }
 
-        // Tüm modeller için relation'ı yükle
         return $relation->eagerLoadAndMatch($models, $name);
     }
 
-    /**
-     * Array'leri Model'lere dönüştürür (hydration)
-     *
-     * @param array $items Ham database satırları
-     * @return array Model instance'ları
-     */
     protected function hydrate(array $items): array
     {
         $models = array_map(function ($item) {
             return $this->model->newFromBuilder($item);
         }, $items);
 
-        // Eager loading varsa uygula
         if (!empty($this->eagerLoad)) {
             $models = $this->eagerLoadRelations($models);
         }
@@ -310,67 +263,46 @@ class Builder extends QueryBuilder
     }
 
     /**
-     * Sayfalama yapar ve Model collection döndürür
-     *
-     * @param int $page
-     * @param int $perPage
-     * @return array
+     * Sayfalama (data'yı hydrate eder)
      */
-    public function paginate(int $page = 1, int $perPage = 15): array
+    public function paginateModels(int $page = 1, int $perPage = 15): array
     {
         $result = parent::paginate($page, $perPage);
 
-        // Data'yı hydrate et
-        $result['data'] = $this->hydrate($result['data']);
+        $result['data'] = $this->model->newCollection(
+            $this->hydrate($result['data'])
+        );
 
         return $result;
     }
 
     /**
-     * Model sayısını döndürür
-     *
-     * @return int
-     */
-    public function count(): int
-    {
-        return parent::count();
-    }
-
-    /**
-     * Model var mı kontrol eder
-     *
-     * @return bool
-     */
-    public function exists(): bool
-    {
-        return parent::exists();
-    }
-
-    /**
      * Chunk processing (Model'lerle)
-     *
-     * @param int $size
-     * @param callable $callback
-     * @return bool
      */
-    public function chunk(int $size, callable $callback): bool
+    public function chunkModels(int $size, callable $callback): bool
     {
-        return parent::chunk($size, function ($results) use ($callback) {
-            $models = $this->hydrate($results);
-            return $callback($models);
-        });
+        $page = 1;
+
+        do {
+            $result = $this->paginateModels($page, $size);
+            $models = $result['data'];
+
+            if ($models->isEmpty()) {
+                break;
+            }
+
+            if ($callback($models, $page) === false) {
+                return false;
+            }
+
+            $page++;
+        } while ($models->count() === $size);
+
+        return true;
     }
 
     /**
      * Model scope'larını uygular
-     *
-     * @param string $scope Scope method adı
-     * @param array $parameters Parametreler
-     * @return self
-     *
-     * @example
-     * Model'de: public function scopeActive($query) { ... }
-     * Kullanım: User::active()->get(); veya $query->scope('active')
      */
     public function scope(string $scope, array $parameters = []): self
     {
@@ -384,18 +316,15 @@ class Builder extends QueryBuilder
     }
 
     /**
-     * Dinamik scope method çağrıları
-     *
-     * @example User::active()->get() -> scopeActive() çağrılır
+     * Magic call - scope'ları kontrol eder
      */
     public function __call(string $method, array $parameters): mixed
     {
-        // Scope dene
-        if (method_exists($this->model, 'scope' . ucfirst($method))) {
+        $scopeMethod = 'scope' . ucfirst($method);
+        if (method_exists($this->model, $scopeMethod)) {
             return $this->scope($method, $parameters);
         }
 
-        // Parent'a düş
         return parent::__call($method, $parameters);
     }
 }

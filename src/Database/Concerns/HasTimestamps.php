@@ -12,11 +12,11 @@ namespace Zephyr\Database\Concerns;
  *
  * Kullanım:
  * - $model->timestamps = true (varsayılan)
- * - $model->timestamps = false (devre dışı bırakmak için)
+ * - $model->timestamps = false (devre dışı)
  *
  * Özelleştirme:
- * - $createdAtColumn değiştirilebilir
- * - $updatedAtColumn değiştirilebilir
+ * - const CREATED_AT = 'custom_created_at';
+ * - const UPDATED_AT = 'custom_updated_at';
  *
  * @author  Ahmet ALTUN
  * @email   ahmet.altun60@gmail.com
@@ -30,19 +30,7 @@ trait HasTimestamps
     public bool $timestamps = true;
 
     /**
-     * created_at sütun adı
-     */
-    protected string $createdAtColumn = 'created_at';
-
-    /**
-     * updated_at sütun adı
-     */
-    protected string $updatedAtColumn = 'updated_at';
-
-    /**
-     * Model timestamps kullanıyor mu kontrol eder
-     *
-     * @return bool
+     * Model timestamps kullanıyor mu?
      */
     public function usesTimestamps(): bool
     {
@@ -51,33 +39,31 @@ trait HasTimestamps
 
     /**
      * created_at sütun adını döndürür
-     *
-     * @return string
      */
     public function getCreatedAtColumn(): string
     {
-        return $this->createdAtColumn;
+        return defined('static::CREATED_AT') ? static::CREATED_AT : 'created_at';
     }
 
     /**
      * updated_at sütun adını döndürür
-     *
-     * @return string
      */
     public function getUpdatedAtColumn(): string
     {
-        return $this->updatedAtColumn;
+        return defined('static::UPDATED_AT') ? static::UPDATED_AT : 'updated_at';
     }
 
     /**
      * Timestamp sütunlarını günceller
-     *
+     * 
      * Bu metot Model::save() içinde otomatik çağrılır.
-     *
-     * @return self
      */
     public function updateTimestamps(): self
     {
+        if (!$this->usesTimestamps()) {
+            return $this;
+        }
+
         $time = $this->freshTimestamp();
 
         // updated_at'i her zaman güncelle
@@ -93,8 +79,6 @@ trait HasTimestamps
 
     /**
      * Yeni timestamp değeri oluşturur
-     *
-     * @return string Y-m-d H:i:s formatında timestamp
      */
     protected function freshTimestamp(): string
     {
@@ -103,19 +87,14 @@ trait HasTimestamps
 
     /**
      * Timestamp string olarak döndürür
-     *
-     * @return string
      */
     public function freshTimestampString(): string
     {
-        return $this->fromDateTime($this->freshTimestamp());
+        return $this->freshTimestamp();
     }
 
     /**
      * created_at değerini set eder
-     *
-     * @param mixed $value Timestamp değeri
-     * @return self
      */
     public function setCreatedAt(mixed $value): self
     {
@@ -125,9 +104,6 @@ trait HasTimestamps
 
     /**
      * updated_at değerini set eder
-     *
-     * @param mixed $value Timestamp değeri
-     * @return self
      */
     public function setUpdatedAt(mixed $value): self
     {
@@ -137,8 +113,6 @@ trait HasTimestamps
 
     /**
      * created_at değerini döndürür
-     *
-     * @return mixed
      */
     public function getCreatedAt(): mixed
     {
@@ -147,8 +121,6 @@ trait HasTimestamps
 
     /**
      * updated_at değerini döndürür
-     *
-     * @return mixed
      */
     public function getUpdatedAt(): mixed
     {
@@ -156,14 +128,10 @@ trait HasTimestamps
     }
 
     /**
-     * updated_at'i günceller (kayıt yapmadan)
-     *
-     * Model'i değiştirmeden sadece updated_at'i güncellemek için kullanılır.
-     *
-     * @return bool
-     *
-     * @example
-     * $post->touch(); // updated_at güncellenir
+     * Model'i kaydetmeden sadece updated_at'i günceller
+     * 
+     * İlişkili modeller için parent model'in updated_at'ini güncellemek
+     * için kullanılır.
      */
     public function touch(): bool
     {
@@ -174,5 +142,28 @@ trait HasTimestamps
         $this->updateTimestamps();
 
         return $this->save();
+    }
+
+    /**
+     * Parent ilişkiyi touch eder
+     * 
+     * Örnek: Comment kaydedildiğinde Post'un updated_at'i güncellenir
+     * 
+     * @param string $relation Parent relation adı
+     * @return bool
+     */
+    public function touchParent(string $relation): bool
+    {
+        if (!$this->relationLoaded($relation)) {
+            $this->load($relation);
+        }
+
+        $parent = $this->getRelation($relation);
+
+        if ($parent && method_exists($parent, 'touch')) {
+            return $parent->touch();
+        }
+
+        return false;
     }
 }
