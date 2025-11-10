@@ -13,7 +13,7 @@ use Zephyr\Database\Concerns\HasRelationships;
 use Zephyr\Support\Collection;
 
 /**
- * Active Record Base Model
+ * Active Record Temel Model
  *
  * Tüm model sınıflarının miras alacağı temel sınıf.
  * Active Record pattern implementasyonu.
@@ -37,6 +37,13 @@ abstract class Model
     use HasAttributes;
     use HasTimestamps;
     use HasRelationships;
+
+    /**
+     * Timestamp sütun adları (override edilebilir)
+     */
+    public const CREATED_AT = 'created_at';
+    public const UPDATED_AT = 'updated_at';
+    public const DELETED_AT = 'deleted_at';
 
     /**
      * Veritabanı bağlantısı
@@ -640,6 +647,8 @@ abstract class Model
 
     /**
      * Model'i veritabanından yeniler
+     * 
+     * ✅ DÜZELTME: firstModel() kullanıyor
      */
     public function refresh(): self
     {
@@ -649,7 +658,7 @@ abstract class Model
 
         $fresh = $this->newQuery()
             ->where($this->getKeyName(), '=', $this->getKey())
-            ->first();
+            ->firstModel(); // ✅ DÜZELTME: first() yerine firstModel()
 
         if ($fresh) {
             $this->setRawAttributes($fresh->getAttributes(), true);
@@ -675,7 +684,7 @@ abstract class Model
             $query->with(is_array($with) ? $with : func_get_args());
         }
 
-        return $query->where($this->getKeyName(), '=', $this->getKey())->first();
+        return $query->where($this->getKeyName(), '=', $this->getKey())->firstModel(); // ✅ DÜZELTME: first() yerine firstModel()
     }
 
     /**
@@ -728,6 +737,8 @@ abstract class Model
 
     /**
      * Relations'ları array'e çevirir
+     * 
+     * ✅ DÜZELTME: Doğru map() syntax'ı kullanıyor
      */
     protected function relationsToArray(): array
     {
@@ -735,7 +746,10 @@ abstract class Model
 
         foreach ($this->relations as $key => $value) {
             if ($value instanceof Collection) {
-                $relations[$key] = $value->map->toArray()->all();
+                // ✅ DÜZELTME: $value->map->toArray() yerine düzgün callback
+                $relations[$key] = $value->map(function($item) {
+                    return $item->toArray();
+                })->all();
             } elseif ($value instanceof Model) {
                 $relations[$key] = $value->toArray();
             } else {
@@ -784,7 +798,7 @@ abstract class Model
         return static::query()
             ->where((new static)->getKeyName(), '=', $id)
             ->select(...$columns)
-            ->first();
+            ->firstModel(); // ✅ DÜZELTME: first() yerine firstModel()
     }
 
     /**
@@ -805,10 +819,12 @@ abstract class Model
 
     /**
      * Static: Tüm modelleri döndürür
+     * 
+     * ✅ DÜZELTME: getModels() kullanıyor
      */
     public static function all(array $columns = ['*']): Collection
     {
-        return static::query()->select(...$columns)->get();
+        return static::query()->select(...$columns)->getModels(); // ✅ DÜZELTME: get() yerine getModels()
     }
 
     /**

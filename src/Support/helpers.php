@@ -338,3 +338,50 @@ if (!function_exists('cache')) {
         return app('cache');
     }
 }
+
+if (!function_exists('class_uses_recursive')) {
+    /**
+     * Bir sınıfın kullandığı tüm trait'leri döndürür (recursive)
+     *
+     * Bu fonksiyon bir sınıfın kullandığı trait'leri ve o trait'lerin
+     * kullandığı trait'leri de dahil olmak üzere recursive olarak bulur.
+     *
+     * Laravel'den esinlenilmiştir.
+     *
+     * @param object|string $class Sınıf instance'ı veya sınıf adı
+     * @return array<string> Trait sınıf adları
+     */
+    function class_uses_recursive(object|string $class): array
+    {
+        if (is_object($class)) {
+            $class = get_class($class);
+        }
+
+        $results = [];
+
+        foreach (array_reverse(class_parents($class)) + [$class => $class] as $class) {
+            $results += trait_uses_recursive($class);
+        }
+
+        return array_unique($results);
+    }
+}
+
+if (!function_exists('trait_uses_recursive')) {
+    /**
+     * Bir trait'in kullandığı tüm trait'leri döndürür (recursive)
+     *
+     * @param string $trait Trait adı
+     * @return array<string> Trait sınıf adları
+     */
+    function trait_uses_recursive(string $trait): array
+    {
+        $traits = class_uses($trait) ?: [];
+
+        foreach ($traits as $trait) {
+            $traits += trait_uses_recursive($trait);
+        }
+
+        return $traits;
+    }
+}

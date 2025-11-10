@@ -15,6 +15,7 @@ namespace Zephyr\Database\Concerns;
  * - $model->timestamps = false (devre dışı)
  *
  * Özelleştirme:
+ * Model sınıfında constant override edilebilir:
  * - const CREATED_AT = 'custom_created_at';
  * - const UPDATED_AT = 'custom_updated_at';
  *
@@ -39,18 +40,22 @@ trait HasTimestamps
 
     /**
      * created_at sütun adını döndürür
+     * 
+     * ✅ DÜZELTME: Model'de tanımlı constant'ları kullanıyor
      */
     public function getCreatedAtColumn(): string
     {
-        return defined('static::CREATED_AT') ? static::CREATED_AT : 'created_at';
+        return static::CREATED_AT ?? 'created_at';
     }
 
     /**
      * updated_at sütun adını döndürür
+     * 
+     * ✅ DÜZELTME: Model'de tanımlı constant'ları kullanıyor
      */
     public function getUpdatedAtColumn(): string
     {
-        return defined('static::UPDATED_AT') ? static::UPDATED_AT : 'updated_at';
+        return static::UPDATED_AT ?? 'updated_at';
     }
 
     /**

@@ -17,11 +17,20 @@ use Traversable;
  * PHP dizileri için akıcı (fluent), nesne yönelimli (OOP)
  * bir arayüz sağlar (Laravel Collections'dan esinlenilmiştir).
  *
+ * Özellikler:
+ * - Laravel-style magic property: $collection->map->toArray()
+ * - Fluent interface ile zincirleme işlemler
+ * - Type-safe operations
+ *
  * @template TKey of array-key
  * @template TValue
  *
  * @implements ArrayAccess<TKey, TValue>
  * @implements IteratorAggregate<TKey, TValue>
+ *
+ * @author  Ahmet ALTUN
+ * @email   ahmet.altun60@gmail.com
+ * @github  https://github.com/biyonik
  */
 class Collection implements ArrayAccess, IteratorAggregate, JsonSerializable, Countable
 {
@@ -250,6 +259,47 @@ class Collection implements ArrayAccess, IteratorAggregate, JsonSerializable, Co
         return $this->sortBy($key, true);
     }
 
+    /**
+     * Array'e çevir (her elemanın toArray() metodunu çağırır)
+     * 
+     * ✅ Bu metot Laravel-style magic property için gerekli
+     */
+    public function toArray(): array
+    {
+        return $this->map(function($item) {
+            if (is_object($item) && method_exists($item, 'toArray')) {
+                return $item->toArray();
+            }
+            return $item;
+        })->all();
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | ✅ Laravel-style Magic Property Support
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * Magic property accessor
+     * 
+     * Laravel syntax'ı destekler:
+     * $collection->map->toArray() 
+     * $collection->filter->count()
+     * 
+     * @param string $name
+     * @return mixed
+     */
+    public function __get(string $name): mixed
+    {
+        // map, filter gibi metotlar için magic property döndür
+        if (method_exists($this, $name)) {
+            return new CollectionProxy($this, $name);
+        }
+
+        throw new \BadMethodCallException("Property [{$name}] does not exist on Collection.");
+    }
+
     /*
     |--------------------------------------------------------------------------
     | PHP Arayüz (Interface) Metotları
@@ -311,5 +361,44 @@ class Collection implements ArrayAccess, IteratorAggregate, JsonSerializable, Co
     public function offsetUnset(mixed $offset): void
     {
         unset($this->items[$offset]);
+    }
+}
+
+/**
+ * Collection Proxy Sınıfı
+ * 
+ * Laravel-style magic property syntax'ı için kullanılır.
+ * $collection->map->toArray() gibi syntax'ı destekler.
+ */
+class CollectionProxy
+{
+    public function __construct(
+        private Collection $collection,
+        private string $method
+    ) {}
+
+    /**
+     * Proxy metot çağrıları
+     * 
+     * $collection->map->toArray() -> $collection->map(fn($item) => $item->toArray())
+     */
+    public function __get(string $name): mixed
+    {
+        // map->toArray gibi durumlarda
+        if ($this->method === 'map' && $name === 'toArray') {
+            return $this->collection->map(function($item) {
+                return method_exists($item, 'toArray') ? $item->toArray() : $item;
+            });
+        }
+
+        throw new \BadMethodCallException("Method [{$this->method}->{$name}] is not supported.");
+    }
+
+    /**
+     * Direk metot çağrıları
+     */
+    public function __call(string $name, array $arguments): mixed
+    {
+        return $this->collection->{$this->method}(...$arguments)->{$name}(...$arguments);
     }
 }
