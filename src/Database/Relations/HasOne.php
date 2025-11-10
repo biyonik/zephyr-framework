@@ -7,16 +7,13 @@ namespace Zephyr\Database\Relations;
 use Zephyr\Database\Query\Builder;
 use Zephyr\Database\Model;
 use Zephyr\Database\Relations\Contracts\ReturnsOne;
-use Zephyr\Support\Collection;
 
 /**
  * One-to-One İlişki
  *
- * HasMany'den miras almak yerine doğrudan Relation'dan miras alır.
- * Bu sayede interface uyumsuzluğu çözülür.
- *
- * HasMany: Collection döndürür
- * HasOne: ?Model döndürür
+ * ✅ DÜZELTME: Null pointer sorunları çözüldü!
+ * ✅ DÜZELTME: ReturnsOne interface'i doğru implement edildi!
+ * ✅ DÜZELTME: Type safety eklendi!
  *
  * @author  Ahmet ALTUN
  * @email   ahmet.altun60@gmail.com
@@ -33,7 +30,7 @@ class HasOne extends Relation implements ReturnsOne
         string $foreignKey,
         string $localKey
     ) {
-        parent::__construct($query, $parent);
+        parent::__construct($query, $parent); // ✅ Parent constructor model check yapar
 
         $this->foreignKey = $foreignKey;
         $this->localKey = $localKey;
@@ -50,6 +47,9 @@ class HasOne extends Relation implements ReturnsOne
 
         if (!is_null($localValue)) {
             $this->query->where($this->foreignKey, '=', $localValue);
+        } else {
+            // ✅ DÜZELTME: Local value null ise empty result döndür
+            $this->query->whereRaw('1 = 0');
         }
     }
 
@@ -62,10 +62,11 @@ class HasOne extends Relation implements ReturnsOne
             return $model->getAttribute($this->localKey);
         }, $models);
 
-        $keys = array_unique(array_filter($keys));
+        $keys = array_unique(array_filter($keys, fn($key) => !is_null($key)));
 
         if (empty($keys)) {
-            $this->query->where($this->foreignKey, '=', null);
+            // ✅ DÜZELTME: Key yoksa empty result
+            $this->query->whereRaw('1 = 0');
             return;
         }
 
@@ -73,9 +74,7 @@ class HasOne extends Relation implements ReturnsOne
     }
 
     /**
-     * Eager loading sonuçlarını eşleştirir
-     * 
-     * HasOne için tek model döndürür, HasMany gibi array değil.
+     * ✅ DÜZELTME: HasOne için tek model döndürür (array değil)
      */
     public function match(array $models, array $results, string $relation): array
     {
@@ -84,10 +83,11 @@ class HasOne extends Relation implements ReturnsOne
         foreach ($models as $model) {
             $key = $model->getAttribute($this->localKey);
 
-            if (isset($dictionary[$key])) {
-                // HasOne: İlk kaydı al (tek kayıt olmalı)
+            if ($key !== null && isset($dictionary[$key])) {
+                // ✅ DÜZELTME: HasOne - İlk kaydı al (tek kayıt olmalı)
                 $model->setRelation($relation, $dictionary[$key][0] ?? null);
             } else {
+                // ✅ DÜZELTME: Null döndür
                 $model->setRelation($relation, null);
             }
         }
@@ -96,7 +96,7 @@ class HasOne extends Relation implements ReturnsOne
     }
 
     /**
-     * Dictionary oluşturur (HasMany'den kopyalandı)
+     * ✅ DÜZELTME: Dictionary oluştur (HasMany'den aynı ama null safe)
      */
     protected function buildDictionary(array $results): array
     {
@@ -104,6 +104,11 @@ class HasOne extends Relation implements ReturnsOne
 
         foreach ($results as $result) {
             $foreignKeyValue = $result->getAttribute($this->foreignKey);
+
+            // ✅ DÜZELTME: Null check
+            if ($foreignKeyValue === null) {
+                continue;
+            }
 
             if (!isset($dictionary[$foreignKeyValue])) {
                 $dictionary[$foreignKeyValue] = [];
@@ -116,13 +121,11 @@ class HasOne extends Relation implements ReturnsOne
     }
 
     /**
-     * İlişki sonuçlarını döndürür (tek model)
-     * 
-     * ✅ ReturnsOne interface'ini implement ediyor
+     * ✅ DÜZELTME: ReturnsOne interface - tek model döndürür
      */
     public function getResults(): ?Model
     {
-        return $this->query->firstModel(); // Tek kayıt döndür
+        return $this->query->firstModel(); // ✅ QueryBuilder'da artık mevcut
     }
 
     /**
@@ -130,7 +133,15 @@ class HasOne extends Relation implements ReturnsOne
      */
     public function create(array $attributes): Model
     {
-        $attributes[$this->foreignKey] = $this->parent->getAttribute($this->localKey);
+        // ✅ DÜZELTME: Local key validation
+        $localValue = $this->parent->getAttribute($this->localKey);
+        if ($localValue === null) {
+            throw new \RuntimeException(
+                "Cannot create related model: parent model's {$this->localKey} is null"
+            );
+        }
+
+        $attributes[$this->foreignKey] = $localValue;
         return $this->query->create($attributes);
     }
 
@@ -139,10 +150,15 @@ class HasOne extends Relation implements ReturnsOne
      */
     public function save(Model $model): bool
     {
-        $model->setAttribute(
-            $this->foreignKey,
-            $this->parent->getAttribute($this->localKey)
-        );
+        // ✅ DÜZELTME: Local key validation
+        $localValue = $this->parent->getAttribute($this->localKey);
+        if ($localValue === null) {
+            throw new \RuntimeException(
+                "Cannot save related model: parent model's {$this->localKey} is null"
+            );
+        }
+
+        $model->setAttribute($this->foreignKey, $localValue);
 
         return $model->save();
     }
@@ -157,5 +173,21 @@ class HasOne extends Relation implements ReturnsOne
         }
 
         return $models;
+    }
+
+    /**
+     * ✅ YENİ: Relationship'i dissociate et (foreign key'i null yap)
+     */
+    public function dissociate(): int
+    {
+        return $this->query->update([$this->foreignKey => null]);
+    }
+
+    /**
+     * ✅ YENİ: İlişki var mı kontrol et
+     */
+    public function exists(): bool
+    {
+        return $this->query->exists();
     }
 }

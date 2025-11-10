@@ -7,12 +7,13 @@ namespace Zephyr\Database;
 use PDO;
 use Zephyr\Database\Exception\DatabaseException;
 use Zephyr\Database\Query\Expression;
+use Zephyr\Support\Collection;
 
 /**
  * SQL Sorgu Oluşturucu
  * 
- * Bu sınıf ARRAY döndürür, Model Collection DEĞİL!
- * Model için Query\Builder kullanın.
+ * Bu sınıf hem ARRAY hem MODEL döndürebilir!
+ * Model set edilirse model metotları kullanılabilir.
  */
 class QueryBuilder
 {
@@ -27,10 +28,26 @@ class QueryBuilder
     protected array $havingBindings = [];
     protected ?int $limit = null;
     protected ?int $offset = null;
+    
+    // ✅ YENİ: Model support
+    protected ?\Zephyr\Database\Model $model = null;
 
     public function __construct(
         protected Connection $connection
     ) {}
+
+    // ✅ YENİ: Model setter
+    public function setModel(\Zephyr\Database\Model $model): self
+    {
+        $this->model = $model;
+        return $this;
+    }
+
+    // ✅ YENİ: Model getter
+    public function getModel(): ?\Zephyr\Database\Model
+    {
+        return $this->model;
+    }
 
     public function select(string|array|Expression ...$columns): self
     {
@@ -342,7 +359,7 @@ class QueryBuilder
     }
 
     /**
-     * ARRAY döndürür - Model Collection DEĞİL!
+     * ARRAY döndürür - Raw SQL results
      */
     public function get(): array
     {
@@ -368,13 +385,67 @@ class QueryBuilder
     }
 
     /**
-     * ?ARRAY döndürür - Model DEĞİL!
+     * ?ARRAY döndürür - Raw SQL results
      */
     public function first(): ?array
     {
         $this->limit(1);
         $results = $this->get();
         return $results[0] ?? null;
+    }
+
+    // ✅ YENİ: Model Collection döndürür
+    public function getModels(): Collection
+    {
+        if (!$this->model) {
+            throw new \RuntimeException('Model not set on query builder. Use setModel() first.');
+        }
+
+        $results = $this->get(); // Array results
+
+        if (empty($results)) {
+            return $this->model->newCollection([]);
+        }
+
+        $models = $this->hydrate($results);
+        return $this->model->newCollection($models);
+    }
+
+    // ✅ YENİ: İlk modeli döndürür
+    public function firstModel(): ?\Zephyr\Database\Model
+    {
+        if (!$this->model) {
+            throw new \RuntimeException('Model not set on query builder. Use setModel() first.');
+        }
+
+        $result = $this->first(); // ?Array
+
+        if (is_null($result)) {
+            return null;
+        }
+
+        $models = $this->hydrate([$result]);
+        return $models[0] ?? null;
+    }
+
+    // ✅ YENİ: Primary key ile model bulur
+    public function find(mixed $id, array $columns = ['*']): ?\Zephyr\Database\Model
+    {
+        if (!$this->model) {
+            throw new \RuntimeException('Model not set on query builder. Use setModel() first.');
+        }
+
+        return $this->select(...$columns)
+            ->where($this->model->getKeyName(), '=', $id)
+            ->firstModel();
+    }
+
+    // ✅ YENİ: Array'i Model'lere çevirir
+    protected function hydrate(array $items): array
+    {
+        return array_map(function ($item) {
+            return $this->model->newFromBuilder($item);
+        }, $items);
     }
 
     public function value(string $column): mixed
@@ -599,7 +670,13 @@ class QueryBuilder
         $to = min($offset + $perPage, $total);
 
         $this->limit($perPage)->offset($offset);
-        $data = $this->get();
+
+        // ✅ YENİ: Model varsa model collection döndür
+        if ($this->model) {
+            $data = $this->getModels();
+        } else {
+            $data = $this->get();
+        }
 
         return [
             'data' => $data,
@@ -639,7 +716,7 @@ class QueryBuilder
         do {
             $results = $this->paginate($page, $size)['data'];
 
-            if (empty($results)) {
+            if (($this->model && $results->isEmpty()) || (!$this->model && empty($results))) {
                 break;
             }
 
@@ -648,7 +725,8 @@ class QueryBuilder
             }
 
             $page++;
-        } while (count($results) === $size);
+            $count = $this->model ? $results->count() : count($results);
+        } while ($count === $size);
 
         return true;
     }

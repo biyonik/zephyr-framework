@@ -11,8 +11,9 @@ use Zephyr\Database\Relations\Contracts\RelationContract;
 /**
  * Base Relation Class
  *
- * Tüm ilişki tiplerinin miras aldığı temel sınıf.
- * Ortak fonksiyonalite sağlar.
+ * ✅ DÜZELTME: Null pointer güvenliği eklendi!
+ * ✅ DÜZELTME: Model existence validation!
+ * ✅ DÜZELTME: Type safety improvements!
  *
  * @author  Ahmet ALTUN
  * @email   ahmet.altun60@gmail.com
@@ -27,6 +28,13 @@ abstract class Relation implements RelationContract
     {
         $this->query = $query;
         $this->parent = $parent;
+        
+        // ✅ DÜZELTME: Query'de model set edildiğinden emin ol
+        if (!$this->query->getModel()) {
+            throw new \RuntimeException(
+                'Query builder must have a model set for relations. Use setModel() first.'
+            );
+        }
     }
 
     abstract public function addConstraints(): void;
@@ -42,7 +50,7 @@ abstract class Relation implements RelationContract
 
     protected function getEager(): array
     {
-        return $this->query->get()->all();
+        return $this->query->getModels()->all(); // Collection'dan array'e çevir
     }
 
     public function getQuery(): Builder
@@ -53,6 +61,46 @@ abstract class Relation implements RelationContract
     public function getParent(): Model
     {
         return $this->parent;
+    }
+
+    /**
+     * ✅ YENİ: Model'i güvenli şekilde al
+     */
+    protected function getModelSafely(): Model
+    {
+        $model = $this->query->getModel();
+        
+        if (!$model) {
+            throw new \RuntimeException(
+                'Model not set on relation query. Cannot proceed with relation operations.'
+            );
+        }
+        
+        return $model;
+    }
+
+    /**
+     * ✅ YENİ: Güvenli Collection oluştur
+     */
+    protected function newCollection(array $models = []): \Zephyr\Support\Collection
+    {
+        return $this->getModelSafely()->newCollection($models);
+    }
+
+    /**
+     * ✅ YENİ: Güvenli model instance oluştur
+     */
+    protected function newModelInstance(array $attributes = []): Model
+    {
+        return $this->getModelSafely()->newInstance($attributes);
+    }
+
+    /**
+     * ✅ YENİ: Array'den model oluştur
+     */
+    protected function newFromBuilder(array $attributes): Model
+    {
+        return $this->getModelSafely()->newFromBuilder($attributes);
     }
 
     public function __call(string $method, array $parameters): mixed

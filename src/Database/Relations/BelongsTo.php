@@ -8,6 +8,17 @@ use Zephyr\Database\Query\Builder;
 use Zephyr\Database\Model;
 use Zephyr\Database\Relations\Contracts\ReturnsOne;
 
+/**
+ * Inverse One-to-Many İlişki
+ *
+ * ✅ DÜZELTME: Null pointer sorunları çözüldü!
+ * ✅ DÜZELTME: Type safety eklendi!
+ * ✅ DÜZELTME: Associate/dissociate metotları iyileştirildi!
+ *
+ * @author  Ahmet ALTUN
+ * @email   ahmet.altun60@gmail.com
+ * @github  https://github.com/biyonik
+ */
 class BelongsTo extends Relation implements ReturnsOne
 {
     protected string $foreignKey;
@@ -19,7 +30,7 @@ class BelongsTo extends Relation implements ReturnsOne
         string $foreignKey,
         string $ownerKey
     ) {
-        parent::__construct($query, $parent);
+        parent::__construct($query, $parent); // ✅ Parent constructor model check yapar
 
         $this->foreignKey = $foreignKey;
         $this->ownerKey = $ownerKey;
@@ -33,6 +44,9 @@ class BelongsTo extends Relation implements ReturnsOne
 
         if (!is_null($foreignKeyValue)) {
             $this->query->where($this->ownerKey, '=', $foreignKeyValue);
+        } else {
+            // ✅ DÜZELTME: Foreign key null ise empty result döndür
+            $this->query->whereRaw('1 = 0');
         }
     }
 
@@ -42,16 +56,20 @@ class BelongsTo extends Relation implements ReturnsOne
             return $model->getAttribute($this->foreignKey);
         }, $models);
 
-        $keys = array_unique(array_filter($keys));
+        $keys = array_unique(array_filter($keys, fn($key) => !is_null($key)));
 
         if (empty($keys)) {
-            $this->query->where($this->ownerKey, '=', null);
+            // ✅ DÜZELTME: Key yoksa empty result
+            $this->query->whereRaw('1 = 0');
             return;
         }
 
         $this->query->whereIn($this->ownerKey, $keys);
     }
 
+    /**
+     * ✅ DÜZELTME: Null safe matching
+     */
     public function match(array $models, array $results, string $relation): array
     {
         $dictionary = $this->buildDictionary($results);
@@ -59,7 +77,7 @@ class BelongsTo extends Relation implements ReturnsOne
         foreach ($models as $model) {
             $foreignKeyValue = $model->getAttribute($this->foreignKey);
 
-            if (isset($dictionary[$foreignKeyValue])) {
+            if ($foreignKeyValue !== null && isset($dictionary[$foreignKeyValue])) {
                 $model->setRelation($relation, $dictionary[$foreignKeyValue]);
             } else {
                 $model->setRelation($relation, null);
@@ -69,54 +87,141 @@ class BelongsTo extends Relation implements ReturnsOne
         return $models;
     }
 
+    /**
+     * ✅ DÜZELTME: Dictionary building with null checks
+     */
     protected function buildDictionary(array $results): array
     {
         $dictionary = [];
 
         foreach ($results as $result) {
             $ownerKeyValue = $result->getAttribute($this->ownerKey);
-            $dictionary[$ownerKeyValue] = $result;
+            
+            // ✅ DÜZELTME: Null check
+            if ($ownerKeyValue !== null) {
+                $dictionary[$ownerKeyValue] = $result;
+            }
         }
 
         return $dictionary;
     }
 
+    /**
+     * ✅ DÜZELTME: ReturnsOne interface - tek model döndürür
+     */
     public function getResults(): ?Model
     {
-        return $this->query->first();
+        return $this->query->firstModel(); // ✅ QueryBuilder'da artık mevcut
     }
 
+    /**
+     * ✅ DÜZELTME: Associate metodu güvenli hale getirildi
+     */
     public function associate(Model $model): Model
     {
-        $this->parent->setAttribute(
-            $this->foreignKey,
-            $model->getAttribute($this->ownerKey)
-        );
+        $ownerKeyValue = $model->getAttribute($this->ownerKey);
+        
+        if ($ownerKeyValue === null) {
+            throw new \RuntimeException(
+                "Cannot associate model: target model's {$this->ownerKey} is null"
+            );
+        }
 
-        $this->parent->setRelation(
-            $this->getRelationName(),
-            $model
-        );
+        $this->parent->setAttribute($this->foreignKey, $ownerKeyValue);
+
+        // ✅ DÜZELTME: Relation name'i dinamik bulma
+        $relationName = $this->getRelationName();
+        $this->parent->setRelation($relationName, $model);
 
         return $this->parent;
     }
 
+    /**
+     * ✅ DÜZELTME: Dissociate metodu güvenli hale getirildi
+     */
     public function dissociate(): Model
     {
         $this->parent->setAttribute($this->foreignKey, null);
-        $this->parent->setRelation($this->getRelationName(), null);
+        
+        $relationName = $this->getRelationName();
+        $this->parent->setRelation($relationName, null);
 
         return $this->parent;
     }
 
+    /**
+     * ✅ DÜZELTME: Relation name'i daha güvenli bulma
+     */
     protected function getRelationName(): string
     {
-        $backtrace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 3);
-        return $backtrace[2]['function'] ?? 'relation';
+        // Debug backtrace ile relation method adını bul
+        $backtrace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 5);
+        
+        foreach ($backtrace as $trace) {
+            if (isset($trace['function']) && 
+                isset($trace['class']) && 
+                $trace['class'] !== static::class &&
+                $trace['class'] !== Relation::class &&
+                !str_contains($trace['function'], '__')) {
+                return $trace['function'];
+            }
+        }
+        
+        return 'relation'; // Fallback
     }
 
+    /**
+     * ✅ DÜZELTME: Update metodu güvenli hale getirildi
+     */
     public function update(array $attributes): int
     {
+        if (empty($attributes)) {
+            return 0;
+        }
+
         return $this->query->update($attributes);
+    }
+
+    /**
+     * ✅ YENİ: İlişki var mı kontrol et
+     */
+    public function exists(): bool
+    {
+        return $this->query->exists();
+    }
+
+    /**
+     * ✅ YENİ: İlişkili model'i first or create
+     */
+    public function firstOrCreate(array $attributes = []): Model
+    {
+        $model = $this->query->firstModel();
+        
+        if ($model) {
+            return $model;
+        }
+
+        // Yeni model oluştur
+        $newModel = $this->newModelInstance($attributes);
+        $newModel->save();
+
+        // Associate et
+        $this->associate($newModel);
+
+        return $newModel;
+    }
+
+    /**
+     * ✅ YENİ: İlişkili model'i first or new  
+     */
+    public function firstOrNew(array $attributes = []): Model
+    {
+        $model = $this->query->firstModel();
+        
+        if ($model) {
+            return $model;
+        }
+
+        return $this->newModelInstance($attributes);
     }
 }

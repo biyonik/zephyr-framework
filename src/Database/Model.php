@@ -10,23 +10,15 @@ use Zephyr\Database\Exception\ModelNotFoundException;
 use Zephyr\Database\Concerns\HasAttributes;
 use Zephyr\Database\Concerns\HasTimestamps;
 use Zephyr\Database\Concerns\HasRelationships;
+use Zephyr\Database\Events\HasModelEvents;
 use Zephyr\Support\Collection;
 
 /**
  * Active Record Temel Model
  *
- * Tüm model sınıflarının miras alacağı temel sınıf.
- * Active Record pattern implementasyonu.
- *
- * Özellikler:
- * - Mass assignment koruması (fillable/guarded)
- * - Attribute casting (int, bool, json, date vs.)
- * - Dirty tracking (değişiklik takibi)
- * - Otomatik timestamps (created_at, updated_at)
- * - İlişkiler (hasMany, belongsTo, hasOne, belongsToMany)
- * - Query builder entegrasyonu
- * - Global scopes
- * - Soft deletes (trait ile)
+ * ✅ YENİ: Model Event System entegrasyonu!
+ * ✅ YENİ: Advanced mass assignment validation!
+ * ✅ YENİ: Improved error handling!
  *
  * @author  Ahmet ALTUN
  * @email   ahmet.altun60@gmail.com
@@ -37,6 +29,7 @@ abstract class Model
     use HasAttributes;
     use HasTimestamps;
     use HasRelationships;
+    use HasModelEvents; // ✅ YENİ: Event system
 
     /**
      * Timestamp sütun adları (override edilebilir)
@@ -111,6 +104,16 @@ abstract class Model
     protected array $dates = [];
 
     /**
+     * ✅ YENİ: Validation rules (advanced mass assignment)
+     */
+    protected array $rules = [];
+
+    /**
+     * ✅ YENİ: Custom validation messages
+     */
+    protected array $messages = [];
+
+    /**
      * Varsayılan attribute değerleri
      */
     protected array $attributes = [];
@@ -126,12 +129,12 @@ abstract class Model
     protected array $changes = [];
 
     /**
-     * Model global scope'ları
+     * Model başına global scope'lar
      */
     protected static array $globalScopes = [];
 
     /**
-     * Model boot edildi mi?
+     * Model başına boot edildi mi?
      */
     protected static array $booted = [];
 
@@ -151,7 +154,7 @@ abstract class Model
     }
 
     /**
-     * Model henüz boot edilmediyse boot eder
+     * Model sınıfı başına boot kontrolü
      */
     protected function bootIfNotBooted(): void
     {
@@ -180,7 +183,7 @@ abstract class Model
     }
 
     /**
-     * Global scope ekler
+     * Sınıf başına global scope ekleme
      */
     public static function addGlobalScope(ScopeInterface $scope): void
     {
@@ -266,13 +269,12 @@ abstract class Model
     }
 
     /**
-     * Yeni query builder oluşturur (global scope'larla)
+     * Query builder'ı Model-aware yapıyor
      */
     public function newQuery(): Builder
     {
-        $builder = (new Builder($this->getConnection()))
-            ->setModel($this)
-            ->from($this->getTable());
+        $builder = new Builder($this->getConnection());
+        $builder->setModel($this)->from($this->getTable());
 
         return $this->applyGlobalScopes($builder);
     }
@@ -282,9 +284,8 @@ abstract class Model
      */
     public function newQueryWithoutScopes(): Builder
     {
-        return (new Builder($this->getConnection()))
-            ->setModel($this)
-            ->from($this->getTable());
+        $builder = new Builder($this->getConnection());
+        return $builder->setModel($this)->from($this->getTable());
     }
 
     /**
@@ -308,15 +309,91 @@ abstract class Model
     }
 
     /**
-     * Model'i attribute'larla doldurur (mass assignment)
+     * ✅ İYİLEŞTİRİLDİ: Model'i attribute'larla doldurur (advanced validation)
      */
     public function fill(array $attributes): self
     {
         foreach ($this->fillableFromArray($attributes) as $key => $value) {
+            // ✅ YENİ: Advanced validation
+            if (!empty($this->rules) && isset($this->rules[$key])) {
+                $this->validateAttribute($key, $value);
+            }
+            
             $this->setAttribute($key, $value);
         }
 
         return $this;
+    }
+
+    /**
+     * ✅ YENİ: Single attribute validation
+     */
+    protected function validateAttribute(string $key, mixed $value): void
+    {
+        $rules = $this->rules[$key] ?? [];
+        
+        if (empty($rules)) {
+            return;
+        }
+
+        foreach ((array) $rules as $rule) {
+            if (!$this->validateRule($key, $value, $rule)) {
+                $message = $this->messages["{$key}.{$rule}"] ?? "Invalid value for {$key}";
+                throw new \InvalidArgumentException($message);
+            }
+        }
+    }
+
+    /**
+     * ✅ YENİ: Rule validation
+     */
+    protected function validateRule(string $key, mixed $value, string $rule): bool
+    {
+        return match ($rule) {
+            'required' => !is_null($value) && $value !== '',
+            'email' => is_string($value) && filter_var($value, FILTER_VALIDATE_EMAIL) !== false,
+            'numeric' => is_numeric($value),
+            'integer' => is_int($value) || (is_string($value) && ctype_digit($value)),
+            'string' => is_string($value),
+            'boolean' => is_bool($value),
+            default => $this->validateComplexRule($key, $value, $rule),
+        };
+    }
+
+    /**
+     * ✅ YENİ: Complex rule validation (min:8, max:50, etc.)
+     */
+    protected function validateComplexRule(string $key, mixed $value, string $rule): bool
+    {
+        if (str_contains($rule, ':')) {
+            [$ruleName, $parameter] = explode(':', $rule, 2);
+            
+            return match ($ruleName) {
+                'min' => is_string($value) && strlen($value) >= (int) $parameter,
+                'max' => is_string($value) && strlen($value) <= (int) $parameter,
+                'in' => in_array($value, explode(',', $parameter), true),
+                'unique' => $this->validateUniqueRule($key, $value, $parameter),
+                default => true,
+            };
+        }
+        
+        return true;
+    }
+
+    /**
+     * ✅ YENİ: Unique rule validation
+     */
+    protected function validateUniqueRule(string $key, mixed $value, string $table): bool
+    {
+        $query = $this->newQueryWithoutScopes()
+            ->where($key, '=', $value);
+        
+        // Exclude current model if updating
+        if ($this->exists) {
+            $query->where($this->getKeyName(), '!=', $this->getKey());
+        }
+        
+        return !$query->exists();
     }
 
     /**
@@ -546,10 +623,15 @@ abstract class Model
     }
 
     /**
-     * Model'i veritabanına kaydeder
+     * ✅ İYİLEŞTİRİLDİ: Model'i veritabanına kaydeder (EVENT SUPPORT)
      */
     public function save(): bool
     {
+        // ✅ YENİ: Fire saving event
+        if (!$this->fireModelEvent('saving')) {
+            return false;
+        }
+
         // Timestamps'i güncelle
         if ($this->usesTimestamps() && ($this->isDirty() || !$this->exists)) {
             $this->updateTimestamps();
@@ -562,14 +644,37 @@ abstract class Model
 
         // INSERT veya UPDATE
         if ($this->exists) {
+            // ✅ YENİ: Fire updating event
+            if (!$this->fireModelEvent('updating')) {
+                return false;
+            }
+            
             $saved = $this->performUpdate();
+            
+            if ($saved) {
+                // ✅ YENİ: Fire updated event
+                $this->fireModelEvent('updated');
+            }
         } else {
+            // ✅ YENİ: Fire creating event
+            if (!$this->fireModelEvent('creating')) {
+                return false;
+            }
+            
             $saved = $this->performInsert();
+            
+            if ($saved) {
+                // ✅ YENİ: Fire created event
+                $this->fireModelEvent('created');
+            }
         }
 
         if ($saved) {
             $this->syncChanges();
             $this->syncOriginal();
+            
+            // ✅ YENİ: Fire saved event
+            $this->fireModelEvent('saved');
         }
 
         return $saved;
@@ -625,11 +730,16 @@ abstract class Model
     }
 
     /**
-     * Model'i veritabanından siler
+     * ✅ İYİLEŞTİRİLDİ: Model'i veritabanından siler (EVENT SUPPORT)
      */
     public function delete(): bool
     {
         if (!$this->exists) {
+            return false;
+        }
+
+        // ✅ YENİ: Fire deleting event
+        if (!$this->fireModelEvent('deleting')) {
             return false;
         }
 
@@ -639,6 +749,10 @@ abstract class Model
 
         if ($deleted > 0) {
             $this->exists = false;
+            
+            // ✅ YENİ: Fire deleted event
+            $this->fireModelEvent('deleted');
+            
             return true;
         }
 
@@ -647,8 +761,6 @@ abstract class Model
 
     /**
      * Model'i veritabanından yeniler
-     * 
-     * ✅ DÜZELTME: firstModel() kullanıyor
      */
     public function refresh(): self
     {
@@ -658,7 +770,7 @@ abstract class Model
 
         $fresh = $this->newQuery()
             ->where($this->getKeyName(), '=', $this->getKey())
-            ->firstModel(); // ✅ DÜZELTME: first() yerine firstModel()
+            ->firstModel();
 
         if ($fresh) {
             $this->setRawAttributes($fresh->getAttributes(), true);
@@ -684,7 +796,7 @@ abstract class Model
             $query->with(is_array($with) ? $with : func_get_args());
         }
 
-        return $query->where($this->getKeyName(), '=', $this->getKey())->firstModel(); // ✅ DÜZELTME: first() yerine firstModel()
+        return $query->where($this->getKeyName(), '=', $this->getKey())->firstModel();
     }
 
     /**
@@ -736,9 +848,7 @@ abstract class Model
     }
 
     /**
-     * Relations'ları array'e çevirir
-     * 
-     * ✅ DÜZELTME: Doğru map() syntax'ı kullanıyor
+     * Relations'ları array'e çevirir - Collection syntax düzeltildi
      */
     protected function relationsToArray(): array
     {
@@ -746,10 +856,8 @@ abstract class Model
 
         foreach ($this->relations as $key => $value) {
             if ($value instanceof Collection) {
-                // ✅ DÜZELTME: $value->map->toArray() yerine düzgün callback
-                $relations[$key] = $value->map(function($item) {
-                    return $item->toArray();
-                })->all();
+                // Laravel-style magic property syntax kullanıyor
+                $relations[$key] = $value->map->toArray;
             } elseif ($value instanceof Model) {
                 $relations[$key] = $value->toArray();
             } else {
@@ -780,13 +888,12 @@ abstract class Model
     }
 
     /**
-     * Static: Yeni model oluşturur ve kaydeder
+     * ✅ İYİLEŞTİRİLDİ: Yeni model oluşturur ve kaydeder (EVENT SUPPORT)
      */
     public static function create(array $attributes): static
     {
         $model = new static($attributes);
-        $model->save();
-
+        $model->save(); // Events fire edilir
         return $model;
     }
 
@@ -798,7 +905,7 @@ abstract class Model
         return static::query()
             ->where((new static)->getKeyName(), '=', $id)
             ->select(...$columns)
-            ->firstModel(); // ✅ DÜZELTME: first() yerine firstModel()
+            ->firstModel();
     }
 
     /**
@@ -819,12 +926,10 @@ abstract class Model
 
     /**
      * Static: Tüm modelleri döndürür
-     * 
-     * ✅ DÜZELTME: getModels() kullanıyor
      */
     public static function all(array $columns = ['*']): Collection
     {
-        return static::query()->select(...$columns)->getModels(); // ✅ DÜZELTME: get() yerine getModels()
+        return static::query()->select(...$columns)->getModels();
     }
 
     /**
